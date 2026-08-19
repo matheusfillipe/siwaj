@@ -24,10 +24,15 @@ All web/tooling commands go through the `Makefile`; do not call pnpm/npm/uv/carg
 ## Commands (Makefile is SSoT)
 - `make install` pnpm + uv sync plus pre-commit hooks
 - `make quality` the full host gate: cargo fmt/clippy/test, web typecheck + bundle, tools ruff + pytest
+- `make build` everything that must compile: quality + esp32s3 release build + QEMU image
+- `make build-release` / `make build-qemu` the individual firmware targets
 - `make fix` autofix pass (cargo fmt/clippy --fix, ruff format)
-- `make firmware-build` / `firmware-flash` / `firmware-monitor` device targets (need espup + cargo-espflash)
-- `make provision` push `.env` secrets into the device NVS over USB serial
-- `make qemu-smoke` boot the release ELF under the Espressif QEMU fork
+- `make test-e2e` automated end-to-end on the emulated device (boot, provision, config flow, geocode, persistence)
+- `make qemu-smoke` CI-shaped boot check; `make qemu-run`/`qemu-stop`/`qemu-provision` interactive emulated device (web ui on http://127.0.0.1:47652)
+- `make demo` interactive emulated e-paper window
+- `make firmware-flash` / `firmware-monitor` / `provision` real-device targets (need espup + cargo-espflash)
+
+All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries directly, and never build or redirect output by hand; add or extend a make target instead.
 
 ## Before considering work complete
 1. Run `make quality`.
@@ -45,10 +50,14 @@ All web/tooling commands go through the `Makefile`; do not call pnpm/npm/uv/carg
 - Python tools: imports at top, no bare `except`, ruff-clean; quality bar is lower by design, do not let tooling concerns leak into core/firmware/web.
 
 ## Conventions
-- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes).
+- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
 - `schemaVersion` is the payload shape version; `siwaj-core::migrate` is the single gate. Bump it only with a migration path there.
 - Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.
+- esp32 build = QEMU-only variant (config-mode + OpenETH); esp32s3 build = the real device. Target-specific code is `#[cfg]`-gated; keep both warning-free (`make build`).
+- `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug.
+- NVS keys are capped at 15 chars: `Secrets` maps `.env` names to short keys (`ow_key`, `wifi_ssid`, `wifi_pass`).
+- QEMU writes device state into `firmware/target-esp32/qemu-dev/device.bin`; delete it to reset the emulated device (the e2e does this every run).
 - Prose (docs, commits): declarative, terse, no em dashes.
 
 ## Hygiene

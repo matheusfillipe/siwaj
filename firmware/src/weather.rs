@@ -1,6 +1,5 @@
-use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use embedded_svc::http::client::Client as HttpClient;
-use esp_idf_svc::io::Read;
+use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use serde::Deserialize;
 
 use crate::secrets::Secrets;
@@ -10,6 +9,7 @@ pub struct Snapshot {
     pub feels_like_c: f32,
     pub minutely_mm: [f32; 60],
     pub hourly_pop: f32,
+    pub timezone_offset_secs: i32,
 }
 
 impl Default for Snapshot {
@@ -18,6 +18,7 @@ impl Default for Snapshot {
             feels_like_c: 0.0,
             minutely_mm: [0.0; 60],
             hourly_pop: 0.0,
+            timezone_offset_secs: 0,
         }
     }
 }
@@ -27,6 +28,8 @@ struct OneCall {
     current: Current,
     minutely: Option<Vec<Minutely>>,
     hourly: Option<Vec<Hourly>>,
+    #[serde(default)]
+    timezone_offset: i32,
 }
 
 #[derive(Deserialize)]
@@ -90,6 +93,7 @@ pub fn fetch(secrets: &Secrets, lat: f64, lon: f64) -> Result<Snapshot, String> 
     let parsed: OneCall = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
     let mut snapshot = Snapshot {
         feels_like_c: parsed.current.feels_like,
+        timezone_offset_secs: parsed.timezone_offset,
         ..Default::default()
     };
     if let Some(minutely) = parsed.minutely {

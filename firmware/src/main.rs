@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("siwaj awake");
 
-    let mut peripherals = Peripherals::take()?;
+    let peripherals = Peripherals::take()?;
     let sys_loop = esp_idf_svc::eventloop::EspSystemEventLoop::take()?;
     let nvs_partition = esp_idf_svc::nvs::EspDefaultNvsPartition::take()?;
 
@@ -94,13 +94,14 @@ fn main() -> anyhow::Result<()> {
 
     #[cfg(esp32s3)]
     {
-        run_weather_cycle(pins, spi2, adc1, store, secrets_store)?;
+        run_weather_cycle(
+            pins, spi2, adc1, modem, sys_loop, nvs_partition, store, secrets_store,
+        )?;
         deep_sleep(store);
     }
     #[cfg(esp32)]
     {
         // esp32 build exists for QEMU only: always the config-mode path
-        let _ = &nvs_partition;
         run_config_mode(mac, sys_loop, store, secrets_store)?;
     }
     Ok(())
@@ -125,6 +126,7 @@ fn run_config_mode(
     #[cfg(esp32)]
     let net = net::bring_up(mac, sys_loop)?;
 
+    sync_time();
     if let Some(ip) = net::ip_info(&net) {
         log::info!("config mode: serving on http://{}", ip.ip);
     }
@@ -141,6 +143,9 @@ fn run_weather_cycle(
     pins: esp_idf_svc::hal::gpio::Pins,
     spi2: esp_idf_svc::hal::spi::SPI2<'static>,
     adc1: esp_idf_svc::hal::adc::ADC1<'static>,
+    modem: esp_idf_svc::hal::modem::Modem<'static>,
+    sys_loop: esp_idf_svc::eventloop::EspSystemEventLoop,
+    nvs_partition: esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault>,
     store: &'static store::Store,
     secrets_store: &'static secrets::Secrets,
 ) -> anyhow::Result<()> {
@@ -149,11 +154,27 @@ fn run_weather_cycle(
         .ok_or_else(|| anyhow::anyhow!("no config for weather cycle"))?;
     let mut board = board::Board::new(pins, spi2, adc1)?;
 
+    // the fetch needs the radio and a valid wall clock; both only exist after
+    // the network is up, and neither survives deep sleep
+    let _net = net::bring_up(
+        modem,
+        sys_loop,
+        secrets_store.get("WIFI_SSID"),
+        secrets_store.get("WIFI_PASS"),
+        nvs_partition,
+    )?;
+    sync_time();
+
     let view = match weather::fetch(secrets_store, config.location.lat, config.location.lon) {
         Ok(snapshot) => {
             let rain = siwaj_core::RainOutlook::from_one_call(
                 snapshot.hourly_pop,
                 &snapshot.minutely_mm,
+            );
+            let updated = hhmm(
+                store
+                    .now_unix()
+                    .wrapping_add(snapshot.timezone_offset_secs as u32),
             );
             siwaj_core::render::View {
                 garment: siwaj_core::Garment::from_feels_like(
@@ -163,12 +184,12 @@ fn run_weather_cycle(
                 feels_like_c: snapshot.feels_like_c,
                 rain,
                 rain_threshold_pct: config.rain_threshold_pct,
-                updated: hhmm(store.now_unix()),
+                updated,
                 battery_pct: board.battery.pct(),
             }
         }
         Err(e) => {
-            log::warn!("weather fetch failed: {e}; keeping display as-is");
+            log::warn!("weather fetch failed: {e}; drawing fallback");
             siwaj_core::render::View {
                 garment: siwaj_core::Garment::Jacket,
                 feels_like_c: 0.0,
@@ -183,7 +204,29 @@ fn run_weather_cycle(
         }
     };
     board.draw(&view)?;
+    board.power_down();
     Ok(())
+}
+
+fn sync_time() {
+    use esp_idf_svc::sntp::{EspSntp, SyncStatus};
+
+    let sntp = match EspSntp::new_default() {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("sntp init failed: {e}");
+            return;
+        }
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while std::time::Instant::now() < deadline {
+        if sntp.get_sync_status() == SyncStatus::Completed {
+            log::info!("sntp synced");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    log::warn!("sntp sync timeout; timestamps will be wrong this cycle");
 }
 
 #[cfg(esp32s3)]

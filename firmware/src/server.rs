@@ -103,5 +103,33 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         Ok(())
     })?;
 
+    server.fn_handler::<AnyError, _>("/api/weather", Method::Get, |req| {
+        let Some(config) = store.load() else {
+            let mut resp = req.into_status_response(409)?;
+            resp.write_all(b"not configured")?;
+            return Ok(());
+        };
+        match weather::fetch(secrets, config.location.lat, config.location.lon) {
+            Ok(snapshot) => {
+                let max_minutely = snapshot.minutely_mm.iter().copied().fold(0.0_f32, f32::max);
+                let payload = serde_json::json!({
+                    "feelsLikeC": snapshot.feels_like_c,
+                    "hourlyPop": snapshot.hourly_pop,
+                    "maxMinutelyMm": max_minutely,
+                    "timezoneOffsetSecs": snapshot.timezone_offset_secs,
+                });
+                let body = serde_json::to_vec(&payload)?;
+                let mut resp = req.into_ok_response()?;
+                resp.write_all(&body)?;
+                resp.flush()?;
+            }
+            Err(e) => {
+                let mut resp = req.into_status_response(502)?;
+                resp.write_all(e.as_bytes())?;
+            }
+        }
+        Ok(())
+    })?;
+
     Ok(server)
 }

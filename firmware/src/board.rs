@@ -6,8 +6,7 @@ mod device {
     use esp_idf_svc::hal::adc::oneshot::{AdcChannelDriver, AdcDriver};
     use esp_idf_svc::hal::adc::attenuation;
     use esp_idf_svc::hal::delay::Ets;
-    use esp_idf_svc::hal::gpio::{Gpio12, PinDriver};
-    use esp_idf_svc::hal::peripherals::Peripherals;
+    use esp_idf_svc::hal::gpio::{Gpio14, PinDriver};
     use esp_idf_svc::hal::spi::{SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig};
     use esp_idf_svc::hal::units::Hertz;
     use epd_waveshare::epd1in54_v2::Epd1in54;
@@ -27,7 +26,7 @@ mod device {
         pub battery: Battery,
         spi: SpiDeviceDriver<'static, SpiDriver<'static>>,
         delay: Ets,
-        _epd_power: PinDriver<'static, esp_idf_svc::hal::gpio::Output>,
+        epd_power: PinDriver<'static, esp_idf_svc::hal::gpio::Output>,
     }
 
     impl Board {
@@ -60,7 +59,7 @@ mod device {
                 spi2,
                 gpio12,
                 gpio13,
-                Option::<esp_idf_svc::hal::gpio::Gpio14<'static>>::None,
+                Option::<Gpio14<'static>>::None,
                 &SpiDriverConfig::new(),
             )?;
             let mut spi = SpiDeviceDriver::new(
@@ -77,7 +76,7 @@ mod device {
                 battery,
                 spi,
                 delay,
-                _epd_power: epd_power,
+                epd_power,
             })
         }
 
@@ -88,6 +87,16 @@ mod device {
             self.epd.display_frame(&mut self.spi, &mut self.delay)?;
             self.epd.sleep(&mut self.spi, &mut self.delay)?;
             Ok(())
+        }
+
+        // both rails are active-low: high = off, minimum sleep current
+        pub fn power_down(&mut self) {
+            let _ = self.epd_power.set_high();
+            if let Ok(mut audio) = PinDriver::output(unsafe {
+                esp_idf_svc::hal::gpio::AnyOutputPin::steal(42)
+            }) {
+                let _ = audio.set_high();
+            }
         }
     }
 
@@ -100,7 +109,7 @@ mod device {
         pub fn new(adc1: esp_idf_svc::hal::adc::ADC1<'static>, gpio4: esp_idf_svc::hal::gpio::Gpio4<'static>) -> Result<Self, anyhow::Error> {
             let driver = Arc::new(AdcDriver::new(adc1)?);
             let config = AdcChannelConfig {
-                attenuation: attenuation::DB_11,
+                attenuation: attenuation::DB_12,
                 calibration: Calibration::Curve,
                 ..Default::default()
             };
@@ -127,4 +136,4 @@ mod device {
 }
 
 #[cfg(esp32s3)]
-pub use device::{Battery, Board, VBAT_PWR_PIN};
+pub use device::{Board, VBAT_PWR_PIN};

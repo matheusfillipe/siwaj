@@ -2,7 +2,7 @@ PNPM := pnpm --dir web
 UV := uv run --project tools
 
 .DEFAULT_GOAL := quality
-.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision quality clean
+.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision build build-release build-qemu test-e2e quality clean
 
 install:
 	$(PNPM) install
@@ -82,6 +82,11 @@ FLASH_IMAGE := firmware/target/siwaj-flash.bin
 firmware-build: web-bundle
 	cd firmware && cargo build --release
 
+# host gate + both firmware targets: everything that must compile before a commit
+build: quality firmware-build qemu-image
+
+build-release: firmware-build
+
 firmware-image: firmware-build
 	cd firmware && cargo espflash save-image --release --chip esp32s3 --merge --skip-padding target/siwaj-flash.bin
 	truncate -s 8M firmware/target/siwaj-flash.bin
@@ -102,6 +107,8 @@ qemu-install:
 # the esp32s3 device build is never disturbed.
 QEMU_IMAGE := firmware/target-esp32/siwaj-smoke.bin
 
+build-qemu: qemu-image
+
 qemu-image: qemu-install web-bundle
 	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
 	truncate -s 4M $(QEMU_IMAGE)
@@ -121,8 +128,14 @@ qemu-stop:
 qemu-provision:
 	$(UV) python -m siwaj_tools.provision --port socket://127.0.0.1:47653
 
+# push .env secrets into the real device over USB serial
 provision:
 	$(UV) python -m siwaj_tools.provision
+
+# automated end-to-end: boots the emulated device, provisions secrets from
+# .env (when present), saves a config, verifies persistence and geocoding
+test-e2e: qemu-image
+	$(UV) python -m siwaj_tools.e2e
 
 # --- gates ---
 
