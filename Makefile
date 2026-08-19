@@ -2,7 +2,7 @@ PNPM := pnpm --dir web
 UV := uv run --project tools
 
 .DEFAULT_GOAL := quality
-.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-smoke quality clean
+.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-smoke quality clean
 
 install:
 	$(PNPM) install
@@ -31,6 +31,15 @@ core-test:
 	cargo test --workspace
 
 core-ts: core-test
+
+# regenerates render fixtures after an intentional layout/icon change
+core-snapshots:
+	cd core && UPDATE_SNAPSHOTS=1 cargo test --test render_test
+
+# interactive window cycling through the four garments (needs SDL2: brew install sdl2)
+# LIBRARY_PATH: sdl2-sys does not query pkg-config, so point clang at Homebrew's libdir
+core-preview:
+	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example preview --features preview
 
 # --- web (vanilla TS; needs `make core-ts` first for generated bindings) ---
 

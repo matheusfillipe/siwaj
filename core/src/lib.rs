@@ -4,6 +4,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod render;
+
 pub const CONFIG_SCHEMA_VERSION: u16 = 1;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
 pub const RAIN_THRESHOLD_PCT_DEFAULT: u8 = 30;

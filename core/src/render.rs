@@ -1,0 +1,373 @@
+use core::convert::Infallible;
+
+use embedded_graphics::geometry::{Point, Size};
+use embedded_graphics::mono_font::MonoTextStyle;
+use embedded_graphics::mono_font::ascii::{FONT_6X12, FONT_10X20};
+use embedded_graphics::pixelcolor::BinaryColor;
+use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::rectangle::Rectangle;
+use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle};
+use embedded_graphics::text::Text;
+
+use crate::{Garment, RainOutlook};
+
+pub const WIDTH: u32 = 200;
+pub const HEIGHT: u32 = 200;
+const BUF_LEN: usize = (WIDTH * HEIGHT / 8) as usize;
+
+const ON: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
+const THICK: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 3);
+const FILL: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
+
+pub struct Framebuffer {
+    buffer: [u8; BUF_LEN],
+}
+
+impl Framebuffer {
+    pub fn new() -> Framebuffer {
+        Framebuffer {
+            buffer: [0xFF; BUF_LEN],
+        }
+    }
+
+    pub fn buffer(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    pub fn iter_pixels(&self) -> impl Iterator<Item = Pixel<BinaryColor>> + '_ {
+        let buf = &self.buffer;
+        (0..HEIGHT).flat_map(move |y| {
+            (0..WIDTH).map(move |x| {
+                let index = (y * WIDTH / 8 + x / 8) as usize;
+                let bit = 7 - (x % 8);
+                let on = (buf[index] >> bit) & 1 == 0;
+                Pixel(Point::new(x as i32, y as i32), BinaryColor::from(on))
+            })
+        })
+    }
+}
+
+impl Default for Framebuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DrawTarget for Framebuffer {
+    type Color = BinaryColor;
+    type Error = Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for Pixel(coord, color) in pixels {
+            let (x, y) = (coord.x as u32, coord.y as u32);
+            if x >= WIDTH || y >= HEIGHT {
+                continue;
+            }
+            let index = (y * WIDTH / 8 + x / 8) as usize;
+            let bit = 7 - (x % 8);
+            match color {
+                BinaryColor::On => self.buffer[index] &= !(1 << bit),
+                BinaryColor::Off => self.buffer[index] |= 1 << bit,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl OriginDimensions for Framebuffer {
+    fn size(&self) -> Size {
+        Size::new(WIDTH, HEIGHT)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct View {
+    pub garment: Garment,
+    pub feels_like_c: f32,
+    pub rain: RainOutlook,
+    pub rain_threshold_pct: u8,
+    pub updated: (u8, u8),
+    pub battery_pct: u8,
+}
+
+struct Bounds {
+    x0: i32,
+    y0: i32,
+    w: i32,
+    h: i32,
+}
+
+fn px(b: &Bounds, fx: f32, fy: f32) -> Point {
+    Point::new(
+        b.x0 + (b.w as f32 * fx) as i32,
+        b.y0 + (b.h as f32 * fy) as i32,
+    )
+}
+
+fn draw_jacket<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
+    let body = Rectangle::with_corners(px(b, 0.30, 0.0), px(b, 0.70, 0.96));
+    body.into_styled(ON).draw(d)?;
+    Line::new(px(b, 0.32, 0.04), px(b, 0.08, 0.64))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 9))
+        .draw(d)?;
+    Line::new(px(b, 0.68, 0.04), px(b, 0.92, 0.64))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 9))
+        .draw(d)?;
+    Line::new(px(b, 0.5, 0.0), px(b, 0.5, 0.94))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+        .draw(d)?;
+    Line::new(px(b, 0.40, 0.0), px(b, 0.5, 0.14))
+        .into_styled(THICK)
+        .draw(d)?;
+    Line::new(px(b, 0.60, 0.0), px(b, 0.5, 0.14))
+        .into_styled(THICK)
+        .draw(d)?;
+    Line::new(px(b, 0.10, 0.96), px(b, 0.90, 0.96))
+        .into_styled(THICK)
+        .draw(d)?;
+    for fx in [0.18, 0.82] {
+        Rectangle::with_corners(px(b, fx - 0.05, 0.66), px(b, fx + 0.05, 0.78))
+            .into_styled(ON)
+            .draw(d)?;
+    }
+    Ok(())
+}
+
+fn draw_pullover<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    b: &Bounds,
+) -> Result<(), D::Error> {
+    let body = Rectangle::with_corners(px(b, 0.32, 0.08), px(b, 0.68, 0.96));
+    body.into_styled(ON).draw(d)?;
+    Rectangle::with_corners(px(b, 0.40, 0.0), px(b, 0.60, 0.10))
+        .into_styled(FILL)
+        .draw(d)?;
+    Line::new(px(b, 0.34, 0.12), px(b, 0.12, 0.72))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 7))
+        .draw(d)?;
+    Line::new(px(b, 0.66, 0.12), px(b, 0.88, 0.72))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 7))
+        .draw(d)?;
+    Line::new(px(b, 0.14, 0.96), px(b, 0.86, 0.96))
+        .into_styled(THICK)
+        .draw(d)?;
+    Line::new(px(b, 0.14, 0.90), px(b, 0.86, 0.90))
+        .into_styled(ON)
+        .draw(d)?;
+    Ok(())
+}
+
+fn draw_shirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
+    let body = Rectangle::with_corners(px(b, 0.32, 0.06), px(b, 0.68, 0.90));
+    body.into_styled(ON).draw(d)?;
+    Line::new(px(b, 0.34, 0.10), px(b, 0.16, 0.34))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 5))
+        .draw(d)?;
+    Line::new(px(b, 0.66, 0.10), px(b, 0.84, 0.34))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 5))
+        .draw(d)?;
+    Line::new(px(b, 0.42, 0.06), px(b, 0.5, 0.18))
+        .into_styled(ON)
+        .draw(d)?;
+    Line::new(px(b, 0.58, 0.06), px(b, 0.5, 0.18))
+        .into_styled(ON)
+        .draw(d)?;
+    for fy in [0.30, 0.46, 0.62] {
+        Circle::new(px(b, 0.5, fy), 1).into_styled(FILL).draw(d)?;
+    }
+    Ok(())
+}
+
+fn draw_tshirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
+    let body = Rectangle::with_corners(px(b, 0.34, 0.10), px(b, 0.66, 0.86));
+    body.into_styled(ON).draw(d)?;
+    Line::new(px(b, 0.36, 0.14), px(b, 0.14, 0.28))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 4))
+        .draw(d)?;
+    Line::new(px(b, 0.64, 0.14), px(b, 0.86, 0.28))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 4))
+        .draw(d)?;
+    Circle::new(px(b, 0.5, 0.08), 7).into_styled(ON).draw(d)?;
+    Ok(())
+}
+
+fn draw_garment<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    garment: Garment,
+) -> Result<(), D::Error> {
+    let b = Bounds {
+        x0: 45,
+        y0: 6,
+        w: 110,
+        h: 84,
+    };
+    match garment {
+        Garment::Jacket => draw_jacket(d, &b),
+        Garment::Pullover => draw_pullover(d, &b),
+        Garment::Shirt => draw_shirt(d, &b),
+        Garment::TShirt => draw_tshirt(d, &b),
+    }
+}
+
+const PATTERNS: [&[u8]; 12] = [
+    &[0b111, 0b101, 0b101, 0b101, 0b111],
+    &[0b010, 0b110, 0b010, 0b010, 0b111],
+    &[0b111, 0b001, 0b111, 0b100, 0b111],
+    &[0b111, 0b001, 0b011, 0b001, 0b111],
+    &[0b101, 0b101, 0b111, 0b001, 0b001],
+    &[0b111, 0b100, 0b111, 0b001, 0b111],
+    &[0b111, 0b100, 0b111, 0b101, 0b111],
+    &[0b111, 0b001, 0b001, 0b010, 0b010],
+    &[0b111, 0b101, 0b111, 0b101, 0b111],
+    &[0b111, 0b101, 0b111, 0b001, 0b111],
+    &[0b000, 0b000, 0b111, 0b000, 0b000],
+    &[0b11, 0b11],
+];
+
+fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    origin: Point,
+    text: &str,
+    cell: i32,
+) -> Result<(), D::Error> {
+    let mut x = origin.x;
+    for ch in text.chars() {
+        let pattern = match ch {
+            '0'..='9' => PATTERNS[ch as usize - '0' as usize],
+            '-' => PATTERNS[10],
+            '\u{00b0}' => PATTERNS[11],
+            _ => continue,
+        };
+        let pattern_cols = if ch == '\u{00b0}' { 2 } else { 3 };
+        for (ry, row) in pattern.iter().enumerate() {
+            for rx in 0..pattern_cols {
+                if (row >> (pattern_cols - 1 - rx)) & 1 == 1 {
+                    let top_left = Point::new(x + rx * cell, origin.y + ry as i32 * cell);
+                    let rect = Rectangle::with_corners(
+                        top_left,
+                        top_left + Size::new(cell as u32 - 1, cell as u32 - 1),
+                    );
+                    rect.into_styled(FILL).draw(d)?;
+                }
+            }
+        }
+        x += pattern_cols * cell + cell;
+    }
+    Ok(())
+}
+
+fn big_text_width(text: &str, cell: i32) -> i32 {
+    let mut w = 0;
+    for ch in text.chars() {
+        let cols = if ch == '\u{00b0}' { 2 } else { 3 };
+        w += cols * cell + cell;
+    }
+    w - cell
+}
+
+fn centered_small<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    cx: i32,
+    y: i32,
+    text: &str,
+) -> Result<(), D::Error> {
+    let style = MonoTextStyle::new(&FONT_6X12, BinaryColor::On);
+    let bb = Text::new(text, Point::zero(), style).bounding_box();
+    let x = cx - bb.size.width as i32 / 2;
+    Text::new(text, Point::new(x, y), style).draw(d).map(|_| ())
+}
+
+fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    view: &View,
+) -> Result<(), D::Error> {
+    let (bx, by) = (8, 156);
+    Circle::new(Point::new(bx + 6, by + 6), 6)
+        .into_styled(FILL)
+        .draw(d)?;
+    Circle::new(Point::new(bx + 14, by + 3), 7)
+        .into_styled(FILL)
+        .draw(d)?;
+    Rectangle::with_corners(Point::new(bx + 1, by + 6), Point::new(bx + 21, by + 13))
+        .into_styled(FILL)
+        .draw(d)?;
+    if view.rain.rain_expected || view.rain.is_risk(view.rain_threshold_pct) {
+        for i in 0..3 {
+            let x = bx + 3 + i * 7;
+            Line::new(Point::new(x, by + 18), Point::new(x - 3, by + 24))
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
+                .draw(d)?;
+        }
+    }
+    let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    Text::new(
+        &format!("{}%", view.rain.pop_pct_next_hour),
+        Point::new(bx + 26, by + 20),
+        style,
+    )
+    .draw(d)
+    .map(|_| ())
+}
+
+fn draw_battery<D: DrawTarget<Color = BinaryColor>>(d: &mut D, pct: u8) -> Result<(), D::Error> {
+    let (bx, by) = (158, 160);
+    Rectangle::with_corners(Point::new(bx, by), Point::new(bx + 21, by + 9))
+        .into_styled(ON)
+        .draw(d)?;
+    Rectangle::with_corners(Point::new(bx + 22, by + 2), Point::new(bx + 24, by + 7))
+        .into_styled(FILL)
+        .draw(d)?;
+    let inner = (18 * pct.min(100) as u32) / 100;
+    if inner > 0 {
+        Rectangle::with_corners(
+            Point::new(bx + 2, by + 2),
+            Point::new(bx + 1 + inner as i32, by + 7),
+        )
+        .into_styled(FILL)
+        .draw(d)?;
+    }
+    let style = MonoTextStyle::new(&FONT_6X12, BinaryColor::On);
+    Text::new(&format!("{pct}%"), Point::new(bx - 2, by + 12), style)
+        .draw(d)
+        .map(|_| ())
+}
+
+fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    updated: (u8, u8),
+) -> Result<(), D::Error> {
+    let (cx, cy) = (86, 166);
+    Circle::new(Point::new(cx, cy), 6).into_styled(ON).draw(d)?;
+    Line::new(Point::new(cx, cy), Point::new(cx, cy - 4))
+        .into_styled(ON)
+        .draw(d)?;
+    Line::new(Point::new(cx, cy), Point::new(cx + 3, cy + 1))
+        .into_styled(ON)
+        .draw(d)?;
+    let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    Text::new(
+        &format!("{:02}:{:02}", updated.0, updated.1),
+        Point::new(cx + 10, cy + 8),
+        style,
+    )
+    .draw(d)
+    .map(|_| ())
+}
+
+pub fn render(view: &View) -> Framebuffer {
+    let mut fb = Framebuffer::new();
+    draw_garment(&mut fb, view.garment).ok();
+    let rounded = view.feels_like_c.round() as i32;
+    let temp = format!("{rounded}\u{00b0}");
+    let cell = 9;
+    let w = big_text_width(&temp, cell);
+    draw_big_text(&mut fb, Point::new((WIDTH as i32 - w) / 2, 96), &temp, cell).ok();
+    centered_small(&mut fb, WIDTH as i32 / 2, 150, "feels like").ok();
+    draw_rain_badge(&mut fb, view).ok();
+    draw_battery(&mut fb, view.battery_pct).ok();
+    draw_updated(&mut fb, view.updated).ok();
+    fb
+}
