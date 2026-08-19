@@ -15,3 +15,6 @@ CONFIG_FREERTOS_UNICORE=y
 
 # TLS bundle for OpenWeather HTTPS
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# browsers send ~600B of headers; the 512 default makes the http server reject them
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

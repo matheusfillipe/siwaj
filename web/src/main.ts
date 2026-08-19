@@ -81,7 +81,6 @@ async function sync(el: Elements): Promise<void> {
   if (server.config !== null && server.config.revision > 0) {
     saveClientState({ revision: server.config.revision, config: server.config });
     fillForm(el, server.config);
-    setStatus(el, `synced from device (revision ${server.config.revision})`);
     return;
   }
 
@@ -94,12 +93,10 @@ async function sync(el: Elements): Promise<void> {
     });
     saveClientState({ revision: saved.revision, config: saved });
     fillForm(el, saved);
-    setStatus(el, `device was unconfigured; restored revision ${saved.revision} from this browser`);
     return;
   }
 
   el.banner.classList.remove("hidden");
-  setStatus(el, "device is unconfigured");
 }
 
 async function onSave(el: Elements, event: SubmitEvent): Promise<void> {
@@ -110,8 +107,9 @@ async function onSave(el: Elements, event: SubmitEvent): Promise<void> {
     const config = await submitConfig(readForm(el));
     saveClientState({ revision: config.revision, config });
     fillForm(el, config);
-    setStatus(el, `saved (revision ${config.revision})`);
+    setStatus(el, "saved");
     el.banner.classList.add("hidden");
+    setTimeout(() => setStatus(el, ""), 2000);
   } catch (err) {
     setStatus(el, err instanceof Error ? err.message : "save failed", true);
   } finally {

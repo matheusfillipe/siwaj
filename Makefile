@@ -2,7 +2,7 @@ PNPM := pnpm --dir web
 UV := uv run --project tools
 
 .DEFAULT_GOAL := quality
-.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-smoke quality clean
+.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-smoke qemu-run quality clean
 
 install:
 	$(PNPM) install
@@ -41,6 +41,9 @@ core-snapshots:
 core-preview:
 	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example preview --features preview
 
+# build fresh and open the live emulated 200x200 e-paper window
+demo: core-preview
+
 # --- web (vanilla TS; needs `make core-ts` first for generated bindings) ---
 
 web-typecheck:
@@ -48,6 +51,8 @@ web-typecheck:
 
 web-bundle:
 	$(PNPM) run build
+	cp web/styles.css web/dist/styles.css
+	gzip -9 -kf web/dist/app.js web/dist/styles.css
 
 web-watch:
 	$(PNPM) run watch
@@ -74,7 +79,7 @@ QEMU_URL := https://github.com/espressif/qemu/releases/download/esp-develop-$(QE
 QEMU_BIN := tools/bin/qemu/bin/qemu-system-xtensa
 FLASH_IMAGE := firmware/target/siwaj-flash.bin
 
-firmware-build:
+firmware-build: web-bundle
 	cd firmware && cargo build --release
 
 firmware-image: firmware-build
@@ -94,12 +99,19 @@ qemu-install:
 
 # Smoke runs the esp32 QEMU machine (the esp32s3 machine hangs on the macOS
 # arm64 prebuilt, espressif/qemu#99). Isolated target dir + sdkconfig so the
-# esp32s3 device build is never disturbed.
-qemu-smoke: qemu-install
+# esp32s3 device build is never disturbed. HTTP forwarded to localhost:47652.
+qemu-smoke: qemu-install web-bundle
 	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
 	truncate -s 4M firmware/target-esp32/siwaj-smoke.bin
 	cp firmware/target-esp32/siwaj-smoke.bin firmware/target-esp32/qemu-run.bin
-	$(UV) python -m siwaj_tools.qemu firmware/target-esp32/qemu-run.bin
+	$(UV) python -m siwaj_tools.qemu firmware/target-esp32/qemu-run.bin --hostfwd 47652
+
+# keep QEMU running with the web UI reachable at http://127.0.0.1:47652
+qemu-run: qemu-install web-bundle
+	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
+	truncate -s 4M firmware/target-esp32/siwaj-smoke.bin
+	cp firmware/target-esp32/siwaj-smoke.bin firmware/target-esp32/qemu-run.bin
+	$(UV) python -m siwaj_tools.qemu firmware/target-esp32/qemu-run.bin --hostfwd 47652 --expect 'config mode: serving' --timeout 180 --keep-running
 
 provision:
 	$(UV) python -m siwaj_tools.provision

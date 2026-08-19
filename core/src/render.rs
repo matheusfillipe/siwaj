@@ -359,15 +359,19 @@ fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
 
 pub fn render(view: &View) -> Framebuffer {
     let mut fb = Framebuffer::new();
-    draw_garment(&mut fb, view.garment).ok();
+    render_to(&mut fb, view);
+    fb
+}
+
+pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
+    draw_garment(d, view.garment).ok();
     let rounded = view.feels_like_c.round() as i32;
     let temp = format!("{rounded}\u{00b0}");
     let cell = 9;
     let w = big_text_width(&temp, cell);
-    draw_big_text(&mut fb, Point::new((WIDTH as i32 - w) / 2, 96), &temp, cell).ok();
-    centered_small(&mut fb, WIDTH as i32 / 2, 150, "feels like").ok();
-    draw_rain_badge(&mut fb, view).ok();
-    draw_battery(&mut fb, view.battery_pct).ok();
-    draw_updated(&mut fb, view.updated).ok();
-    fb
+    draw_big_text(d, Point::new((WIDTH as i32 - w) / 2, 96), &temp, cell).ok();
+    centered_small(d, WIDTH as i32 / 2, 150, "feels like").ok();
+    draw_rain_badge(d, view).ok();
+    draw_battery(d, view.battery_pct).ok();
+    draw_updated(d, view.updated).ok();
 }

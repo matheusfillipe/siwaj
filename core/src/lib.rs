@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub mod render;
+pub use render::View;
 
 pub const CONFIG_SCHEMA_VERSION: u16 = 1;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
