@@ -1,0 +1,18 @@
+# Device-only security overlay, applied by `make firmware-flash` via
+# ESP_IDF_SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.secure.
+# QEMU smoke runs without it: the QEMU fork cannot boot the encrypted-image
+# reflash cycle, and its octal-PSRAM emulation hangs the S3 bootloader.
+
+# NVS encryption
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_NVS_SEC_KEY_PROTECT_USING_FLASH_ENC=y
+
+# Flash encryption, development mode (reflashing stays possible)
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+
+# Octal PSRAM on ESP32-S3-PICO-1-N8R8 (not needed by the app yet; re-enable
+# here when a feature requires it)
+# CONFIG_SPIRAM=y
+# CONFIG_SPIRAM_MODE_OCT=y
+# CONFIG_SPIRAM_SPEED_80M=y

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>siwaj</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1>siwaj</h1>
+      <p class="subtitle">should i wear a jacket</p>
+    </header>
+
+    <div id="banner" class="banner hidden">First setup: pick your city and comfort thresholds, then save.</div>
+    <p id="status" class="status" role="status"></p>
+
+    <form id="config-form">
+      <label for="city">City</label>
+      <input id="city" name="city" type="text" autocomplete="address-level2" placeholder="Berlin" required>
+
+      <fieldset>
+        <legend>Comfort thresholds, feels-like &deg;C</legend>
+        <label for="low">below <output id="lowOut" for="low"></output> jacket</label>
+        <input id="low" name="low" type="number" step="0.5" required>
+        <label for="mid">up to <output id="midOut" for="mid"></output> pullover</label>
+        <input id="mid" name="mid" type="number" step="0.5" required>
+        <label for="high">up to <output id="highOut" for="high"></output> shirt, above t-shirt</label>
+        <input id="high" name="high" type="number" step="0.5" required>
+      </fieldset>
+
+      <label for="rain">Rain risk threshold <output id="rainOut" for="rain"></output></label>
+      <input id="rain" name="rain" type="range" min="0" max="100" step="5" required>
+
+      <label for="refresh">Refresh interval</label>
+      <select id="refresh" name="refresh" required>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+        <option value="60">60 min</option>
+        <option value="120">120 min</option>
+      </select>
+
+      <button id="save" type="submit">Save</button>
+    </form>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

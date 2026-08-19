@@ -1,0 +1,17 @@
+# Rust often needs a bit of an extra main task stack size compared to C (the default is 3K)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Increase a bit these stack sizes as they are also a bit too small by default
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=4096
+
+# Target
+CONFIG_IDF_TARGET="esp32s3"
+
+# Single core: the fetch-sleep loop never needs CPU1, and the QEMU fork's
+# esp32s3 machine stalls booting the second core
+CONFIG_FREERTOS_UNICORE=y
+
+# TLS bundle for OpenWeather HTTPS
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y

@@ -1,0 +1,42 @@
+# secrets / local env
+.env
+.env.*
+!.env.example
+
+# rust
+target/
+firmware/target-esp32/
+
+# esp-idf build state (4GB+ of compiled IDF; sdkconfig.defaults is tracked, sdkconfig is generated)
+.embuild/
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# locally installed QEMU fork (make qemu-install)
+tools/bin/
+
+# web
+web/node_modules/
+web/dist/
+web/src/generated/
+
+# python tooling
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.uv/
+
+# logs / scratch
+*.log
+
+# review gate marker (created by /rev, consumed by commit-guard)
+.rev-ok
+
+.DS_Store

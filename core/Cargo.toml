@@ -1,0 +1,11 @@
+[package]
+name = "siwaj-core"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "Shared config types, decision logic, and TS bindings for siwaj"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1"
+ts-rs = "12.0.1"

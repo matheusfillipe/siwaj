@@ -1,0 +1,124 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f5f4;
+  --card: #ffffff;
+  --ink: #1c1917;
+  --muted: #78716c;
+  --accent: #0f766e;
+  --line: #e7e5e4;
+  --danger: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12100e;
+    --card: #1c1917;
+    --ink: #f5f5f4;
+    --muted: #a8a29e;
+    --accent: #2dd4bf;
+    --line: #292524;
+    --danger: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.card {
+  width: min(28rem, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 1.75rem 2rem 2rem;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 6%);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin: 0.15rem 0 1.25rem;
+  color: var(--muted);
+}
+
+.banner {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--ink);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.status {
+  min-height: 1.4em;
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status.error { color: var(--danger); }
+
+form { display: grid; gap: 0.65rem; }
+
+label { font-size: 0.9rem; color: var(--muted); }
+
+input, select {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem 0.9rem;
+  margin: 0.35rem 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+legend { padding: 0 0.35rem; font-size: 0.85rem; color: var(--muted); }
+
+input[type="range"] { padding: 0; }
+
+button {
+  margin-top: 0.75rem;
+  padding: 0.65rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--card);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: wait; }
+
+.hidden { display: none; }
+
+output { font-weight: 600; color: var(--ink); }

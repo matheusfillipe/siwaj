@@ -1,0 +1,15 @@
+{
+  "name": "siwaj-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --minify --legal-comments=none --outfile=dist/app.js",
+    "typecheck": "tsc --noEmit",
+    "watch": "esbuild src/main.ts --bundle --minify --legal-comments=none --watch --outfile=dist/app.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}

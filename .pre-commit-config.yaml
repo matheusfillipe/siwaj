@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: siwaj-precommit
+        name: make precommit (cargo fmt/clippy-fix + ruff)
+        entry: make precommit
+        language: system
+        pass_filenames: false

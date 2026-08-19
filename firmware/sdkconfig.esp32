@@ -1,0 +1,7 @@
+# QEMU smoke configuration: the firmware compiled for the original ESP32.
+# The espressif QEMU fork's esp32s3 machine hangs during IDF boot on the
+# macOS arm64 prebuilt (invalid read 0x10200C after cpu_start, cf. espressif/qemu
+# issue #99); its esp32 machine is mature. The smoke proves the app boots and
+# runs on emulated hardware; S3-specific behavior is validated on the device.
+CONFIG_IDF_TARGET="esp32"
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
