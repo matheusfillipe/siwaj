@@ -1,13 +1,3 @@
-#[cfg(esp32)]
-pub fn battery_pct() -> u8 {
-    100
-}
-
-use siwaj_core::render::View;
-
-#[cfg(esp32)]
-pub fn draw(_view: &View) {}
-
 #[cfg(esp32s3)]
 mod device {
     use std::sync::Arc;

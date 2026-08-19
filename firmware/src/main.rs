@@ -1,8 +1,9 @@
 #![allow(unknown_lints)]
 #![allow(unexpected_cfgs)]
 
-use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
+#[cfg(esp32s3)]
+use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 
 mod board;
 mod net;
@@ -11,6 +12,7 @@ mod server;
 mod store;
 mod weather;
 
+#[cfg(esp32s3)]
 const WAKE_INTERVAL_SECS: u64 = 30 * 60;
 
 fn main() -> anyhow::Result<()> {
@@ -22,6 +24,25 @@ fn main() -> anyhow::Result<()> {
     let mut peripherals = Peripherals::take()?;
     let sys_loop = esp_idf_svc::eventloop::EspSystemEventLoop::take()?;
     let nvs_partition = esp_idf_svc::nvs::EspDefaultNvsPartition::take()?;
+
+    // stdin needs the UART0 driver attached to VFS; console output works without it
+    let uart0_driver = Box::leak(Box::new(
+        esp_idf_svc::hal::uart::UartDriver::new(
+            peripherals.uart0,
+            unsafe { esp_idf_svc::hal::gpio::AnyOutputPin::steal(1) },
+            unsafe { esp_idf_svc::hal::gpio::AnyInputPin::steal(3) },
+            Option::<esp_idf_svc::hal::gpio::AnyInputPin>::None,
+            Option::<esp_idf_svc::hal::gpio::AnyOutputPin>::None,
+            &esp_idf_svc::hal::uart::config::Config::new()
+                .baudrate(esp_idf_svc::hal::units::Hertz(115_200)),
+        )
+        .expect("uart0 driver"),
+    ));
+    unsafe {
+        esp_idf_svc::sys::esp_vfs_dev_uart_use_driver(
+            esp_idf_svc::sys::uart_port_t_UART_NUM_0 as i32,
+        )
+    };
 
     let store = Box::leak(Box::new(store::take(nvs_partition.clone())?));
     let secrets_store = Box::leak(Box::new(secrets::take(nvs_partition.clone())?));
@@ -48,6 +69,8 @@ fn main() -> anyhow::Result<()> {
         };
         (pins, modem, spi2, adc1)
     };
+    let _ = uart0_driver;
+
     #[cfg(esp32)]
     let mac = peripherals.mac;
 

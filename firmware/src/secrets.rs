@@ -2,6 +2,21 @@ use esp_idf_svc::nvs::{EspNvs, NvsDefault};
 
 const NAMESPACE: &str = "secrets";
 
+// NVS keys are limited to 15 characters; map the .env names to short keys
+const KEY_MAP: [(&str, &str); 3] = [
+    ("OPENWEATHER_API_KEY", "ow_key"),
+    ("WIFI_SSID", "wifi_ssid"),
+    ("WIFI_PASS", "wifi_pass"),
+];
+
+fn nvs_key(name: &str) -> Result<&str, String> {
+    KEY_MAP
+        .iter()
+        .find(|(long, _)| *long == name)
+        .map(|(_, short)| *short)
+        .ok_or_else(|| format!("unknown key {name}"))
+}
+
 pub struct Secrets {
     nvs: EspNvs<NvsDefault>,
 }
@@ -15,6 +30,7 @@ pub fn take(
 
 impl Secrets {
     pub fn get(&self, key: &str) -> Option<String> {
+        let key = nvs_key(key).ok()?;
         let len = self.nvs.str_len(key).ok()??;
         let mut buf = vec![0u8; len];
         let s = self.nvs.get_str(key, &mut buf).ok()??;
@@ -22,19 +38,20 @@ impl Secrets {
     }
 
     pub fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        let key = nvs_key(key)?;
         self.nvs.set_str(key, value).map_err(|e| e.to_string())
     }
 
     pub fn del(&self, key: &str) -> Result<bool, String> {
+        let key = nvs_key(key)?;
         self.nvs.remove(key).map_err(|e| e.to_string())
     }
 
     pub fn keys(&self) -> Vec<String> {
-        vec![
-            "OPENWEATHER_API_KEY".to_string(),
-            "WIFI_SSID".to_string(),
-            "WIFI_PASS".to_string(),
-        ]
+        KEY_MAP
+            .iter()
+            .map(|(long, _)| long.to_string())
+            .collect()
     }
 }
 

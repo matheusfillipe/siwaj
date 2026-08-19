@@ -2,7 +2,7 @@ PNPM := pnpm --dir web
 UV := uv run --project tools
 
 .DEFAULT_GOAL := quality
-.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-smoke qemu-run quality clean
+.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision quality clean
 
 install:
 	$(PNPM) install
@@ -97,21 +97,29 @@ qemu-install:
 	@test -x $(QEMU_BIN) || { curl -sL "$(QEMU_URL)" | tar -xJ -C tools/bin --strip-components=1; }
 	$(QEMU_BIN) --version | head -1
 
-# Smoke runs the esp32 QEMU machine (the esp32s3 machine hangs on the macOS
-# arm64 prebuilt, espressif/qemu#99). Isolated target dir + sdkconfig so the
-# esp32s3 device build is never disturbed. HTTP forwarded to localhost:47652.
-qemu-smoke: qemu-install web-bundle
-	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
-	truncate -s 4M firmware/target-esp32/siwaj-smoke.bin
-	cp firmware/target-esp32/siwaj-smoke.bin firmware/target-esp32/qemu-run.bin
-	$(UV) python -m siwaj_tools.qemu firmware/target-esp32/qemu-run.bin --hostfwd 47652
+# The esp32 QEMU machine emulates OpenETH (the esp32s3 machine hangs on the
+# macOS arm64 prebuilt, espressif/qemu#99). Isolated target dir + sdkconfig so
+# the esp32s3 device build is never disturbed.
+QEMU_IMAGE := firmware/target-esp32/siwaj-smoke.bin
 
-# keep QEMU running with the web UI reachable at http://127.0.0.1:47652
-qemu-run: qemu-install web-bundle
+qemu-image: qemu-install web-bundle
 	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
-	truncate -s 4M firmware/target-esp32/siwaj-smoke.bin
-	cp firmware/target-esp32/siwaj-smoke.bin firmware/target-esp32/qemu-run.bin
-	$(UV) python -m siwaj_tools.qemu firmware/target-esp32/qemu-run.bin --hostfwd 47652 --expect 'config mode: serving' --timeout 180 --keep-running
+	truncate -s 4M $(QEMU_IMAGE)
+
+# CI-shaped: boot, wait for the banner, terminate
+qemu-smoke: qemu-image
+	$(UV) python -m siwaj_tools.qemu smoke $(QEMU_IMAGE)
+
+# dev device: boot detached; web ui on http://127.0.0.1:47652
+qemu-run: qemu-image
+	$(UV) python -m siwaj_tools.qemu serve $(QEMU_IMAGE) --expect 'config mode: serving'
+
+qemu-stop:
+	$(UV) python -m siwaj_tools.qemu stop
+
+# push .env secrets into the emulated device's serial REPL
+qemu-provision:
+	$(UV) python -m siwaj_tools.provision --port socket://127.0.0.1:47653
 
 provision:
 	$(UV) python -m siwaj_tools.provision

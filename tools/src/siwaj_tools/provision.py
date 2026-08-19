@@ -31,7 +31,8 @@ def provision(port: str, env_path: Path) -> int:
         print(f"no populated variables in {env_path}", file=sys.stderr)
         return 1
 
-    with serial.Serial(port, BAUD, timeout=1) as conn:
+    conn = serial.serial_for_url(port, BAUD, timeout=1)
+    try:
         time.sleep(SETTLE_SECONDS)
         conn.reset_input_buffer()
         for key, value in secrets.items():
@@ -49,6 +50,8 @@ def provision(port: str, env_path: Path) -> int:
             else:
                 print(f"set {key}: no reply from device", file=sys.stderr)
                 return 1
+    finally:
+        conn.close()
     print("provisioned", len(secrets), "secrets")
     return 0
 
@@ -56,7 +59,7 @@ def provision(port: str, env_path: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", default=os.environ.get("SIWAJ_PORT", "/dev/cu.usbmodem101"))
-    parser.add_argument("--env", type=Path, default=Path(__file__).parents[2] / ".env")
+    parser.add_argument("--env", type=Path, default=Path(__file__).resolve().parents[3] / ".env")
     args = parser.parse_args()
     if not args.env.exists():
         print(f"missing {args.env}; copy .env.example to .env first", file=sys.stderr)
