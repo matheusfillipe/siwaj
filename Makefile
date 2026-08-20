@@ -8,7 +8,7 @@ UV := uv run --project tools
         web-typecheck web-bundle web-watch \
         tools-format tools-format-check tools-lint tools-test \
         firmware-partitions build build-qemu firmware-image firmware-flash firmware-monitor \
-        qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision provision test-e2e \
+        qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-provision provision test-e2e \
         ci-host-checks ci-emulator-tests ci-local ci-local-plan \
         all clean
 
@@ -148,6 +148,9 @@ qemu-smoke: qemu-image ## boot the emulator image once and check the boot banner
 
 qemu-run: qemu-image ## boot a detached emulated device; web ui on http://127.0.0.1:47652
 	$(UV) python -m siwaj.qemu serve $(QEMU_IMAGE)
+
+qemu-display: ## open an SDL window mirroring the emulated e-paper (run qemu-run first)
+	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example mirror --features preview
 
 qemu-stop:
 	$(UV) python -m siwaj.qemu stop

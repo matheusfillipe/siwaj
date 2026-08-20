@@ -19,3 +19,7 @@ preview = ["dep:embedded-graphics-simulator"]
 [[example]]
 name = "preview"
 required-features = ["preview"]
+
+[[example]]
+name = "mirror"
+required-features = ["preview"]

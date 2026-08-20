@@ -500,6 +500,34 @@ pub fn bmp(fb: &Framebuffer) -> Vec<u8> {
     out
 }
 
+/// Decodes the 24-bit BMP emitted by `bmp` back into a frame; host-side only
+/// (live display mirror and tests). The device encodes, never decodes, so
+/// this is compiled out of firmware builds.
+#[cfg(any(test, feature = "preview"))]
+pub fn decode_bmp(body: &[u8]) -> Option<Framebuffer> {
+    if body.len() < 54 || &body[0..2] != b"BM" {
+        return None;
+    }
+    let width = u32::from_le_bytes(body[18..22].try_into().ok()?) as usize;
+    let height = u32::from_le_bytes(body[22..26].try_into().ok()?) as usize;
+    if width != WIDTH as usize || height != HEIGHT as usize {
+        return None;
+    }
+    let data = body.get(54..)?;
+    let mut fb = Framebuffer::new();
+    for row in 0..height {
+        let y = height - 1 - row;
+        for x in 0..width {
+            let px = data.get(row * width * 3 + x * 3..row * width * 3 + x * 3 + 3)?;
+            if px == [0x00, 0x00, 0x00] {
+                let (index, bit) = bit_position(x as u32, y as u32);
+                fb.buffer[index] &= !(1 << bit);
+            }
+        }
+    }
+    Some(fb)
+}
+
 pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     draw_garment(d, view.garment).ok();
     if view.offline {
@@ -515,4 +543,39 @@ pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     }
     draw_battery(d, view.battery_pct).ok();
     draw_updated(d, view.updated).ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Framebuffer {
+        let mut view = crate::render::View::offline(
+            TimeOfDay {
+                hour: 14,
+                minute: 32,
+            },
+            Some(87),
+        );
+        view.garment = crate::Garment::Pullover;
+        render(&view)
+    }
+
+    #[test]
+    fn bmp_decode_round_trips() {
+        let fb = sample();
+        let back = decode_bmp(&bmp(&fb)).unwrap();
+        assert_eq!(back.buffer(), fb.buffer());
+    }
+
+    #[test]
+    fn bmp_decode_rejects_wrong_shapes() {
+        assert!(decode_bmp(b"").is_none());
+        assert!(decode_bmp(b"BM").is_none());
+        let mut tiny = vec![0u8; 54];
+        tiny[0..2].copy_from_slice(b"BM");
+        tiny[18..22].copy_from_slice(&100u32.to_le_bytes());
+        tiny[22..26].copy_from_slice(&100u32.to_le_bytes());
+        assert!(decode_bmp(&tiny).is_none());
+    }
 }

@@ -29,7 +29,8 @@ The whole device runs emulated, config page included:
 
 ```
 make qemu-run        # emulated device on http://127.0.0.1:47652
-make demo            # the e-paper face itself, in a window
+make qemu-display    # live window with the emulated e-paper face
+make demo            # the e-paper frames, offline sample data
 ```
 
 `make help` lists the rest.
