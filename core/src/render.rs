@@ -18,6 +18,11 @@ const BUF_LEN: usize = (WIDTH * HEIGHT / 8) as usize;
 const ON: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
 const THICK: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 3);
 const FILL: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
+const SLEEVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 9);
+const CARVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::Off);
+const CARVE_S1: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
+const CARVE_S2: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 2);
+const CARVE_S3: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 3);
 
 pub struct Framebuffer {
     buffer: [u8; BUF_LEN],
@@ -139,32 +144,37 @@ fn px(b: &Bounds, fx: f32, fy: f32) -> Point {
     )
 }
 
+// Garments are filled silhouettes; necklines, ribs and seams are carved back
+// out with white (background) primitives, which reads far better at 200x200
+// than stroked outlines.
 fn draw_jacket<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    let body = Rectangle::with_corners(px(b, 0.30, 0.0), px(b, 0.70, 0.96));
-    body.into_styled(ON).draw(d)?;
-    Line::new(px(b, 0.32, 0.04), px(b, 0.08, 0.64))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 9))
-        .draw(d)?;
-    Line::new(px(b, 0.68, 0.04), px(b, 0.92, 0.64))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 9))
-        .draw(d)?;
-    Line::new(px(b, 0.5, 0.0), px(b, 0.5, 0.94))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
-        .draw(d)?;
-    Line::new(px(b, 0.40, 0.0), px(b, 0.5, 0.14))
+    Circle::new(px(b, 0.5, 0.18), 15)
         .into_styled(THICK)
         .draw(d)?;
-    Line::new(px(b, 0.60, 0.0), px(b, 0.5, 0.14))
-        .into_styled(THICK)
+    Rectangle::with_corners(px(b, 0.32, 0.10), px(b, 0.68, 0.96))
+        .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.10, 0.96), px(b, 0.90, 0.96))
-        .into_styled(THICK)
+    Line::new(px(b, 0.34, 0.14), px(b, 0.08, 0.66))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    for fx in [0.18, 0.82] {
-        Rectangle::with_corners(px(b, fx - 0.05, 0.66), px(b, fx + 0.05, 0.78))
-            .into_styled(ON)
-            .draw(d)?;
-    }
+    Line::new(px(b, 0.66, 0.14), px(b, 0.92, 0.66))
+        .into_styled(SLEEVE)
+        .draw(d)?;
+    Line::new(px(b, 0.40, 0.10), px(b, 0.5, 0.30))
+        .into_styled(CARVE_S3)
+        .draw(d)?;
+    Line::new(px(b, 0.60, 0.10), px(b, 0.5, 0.30))
+        .into_styled(CARVE_S3)
+        .draw(d)?;
+    Line::new(px(b, 0.5, 0.30), px(b, 0.5, 0.96))
+        .into_styled(CARVE_S2)
+        .draw(d)?;
+    Line::new(px(b, 0.36, 0.72), px(b, 0.46, 0.72))
+        .into_styled(CARVE_S1)
+        .draw(d)?;
+    Line::new(px(b, 0.54, 0.72), px(b, 0.64, 0.72))
+        .into_styled(CARVE_S1)
+        .draw(d)?;
     Ok(())
 }
 
@@ -172,57 +182,68 @@ fn draw_pullover<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     b: &Bounds,
 ) -> Result<(), D::Error> {
-    let body = Rectangle::with_corners(px(b, 0.32, 0.08), px(b, 0.68, 0.96));
-    body.into_styled(ON).draw(d)?;
-    Rectangle::with_corners(px(b, 0.40, 0.0), px(b, 0.60, 0.10))
+    Rectangle::with_corners(px(b, 0.34, 0.08), px(b, 0.66, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.34, 0.12), px(b, 0.12, 0.72))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 7))
+    Line::new(px(b, 0.36, 0.12), px(b, 0.12, 0.68))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.66, 0.12), px(b, 0.88, 0.72))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 7))
+    Line::new(px(b, 0.64, 0.12), px(b, 0.88, 0.68))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.14, 0.96), px(b, 0.86, 0.96))
-        .into_styled(THICK)
+    Circle::new(px(b, 0.5, 0.09), 6)
+        .into_styled(CARVE)
         .draw(d)?;
-    Line::new(px(b, 0.14, 0.90), px(b, 0.86, 0.90))
-        .into_styled(ON)
+    Line::new(px(b, 0.36, 0.86), px(b, 0.64, 0.86))
+        .into_styled(CARVE_S1)
+        .draw(d)?;
+    Line::new(px(b, 0.36, 0.91), px(b, 0.64, 0.91))
+        .into_styled(CARVE_S1)
         .draw(d)?;
     Ok(())
 }
 
 fn draw_shirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    let body = Rectangle::with_corners(px(b, 0.32, 0.06), px(b, 0.68, 0.90));
-    body.into_styled(ON).draw(d)?;
-    Line::new(px(b, 0.34, 0.10), px(b, 0.16, 0.34))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 5))
+    Rectangle::with_corners(px(b, 0.36, 0.10), px(b, 0.64, 0.96))
+        .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.66, 0.10), px(b, 0.84, 0.34))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 5))
+    Line::new(px(b, 0.38, 0.14), px(b, 0.15, 0.62))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.42, 0.06), px(b, 0.5, 0.18))
-        .into_styled(ON)
+    Line::new(px(b, 0.62, 0.14), px(b, 0.85, 0.62))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.58, 0.06), px(b, 0.5, 0.18))
-        .into_styled(ON)
+    Line::new(px(b, 0.41, 0.10), px(b, 0.5, 0.26))
+        .into_styled(CARVE_S3)
         .draw(d)?;
-    for fy in [0.30, 0.46, 0.62] {
-        Circle::new(px(b, 0.5, fy), 1).into_styled(FILL).draw(d)?;
-    }
+    Line::new(px(b, 0.59, 0.10), px(b, 0.5, 0.26))
+        .into_styled(CARVE_S3)
+        .draw(d)?;
+    Line::new(px(b, 0.5, 0.26), px(b, 0.5, 0.96))
+        .into_styled(CARVE_S1)
+        .draw(d)?;
+    Circle::new(px(b, 0.44, 0.44), 1)
+        .into_styled(CARVE)
+        .draw(d)?;
+    Circle::new(px(b, 0.44, 0.64), 1)
+        .into_styled(CARVE)
+        .draw(d)?;
     Ok(())
 }
 
 fn draw_tshirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    let body = Rectangle::with_corners(px(b, 0.34, 0.10), px(b, 0.66, 0.86));
-    body.into_styled(ON).draw(d)?;
-    Line::new(px(b, 0.36, 0.14), px(b, 0.14, 0.28))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 4))
+    Rectangle::with_corners(px(b, 0.34, 0.12), px(b, 0.66, 0.96))
+        .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.64, 0.14), px(b, 0.86, 0.28))
-        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 4))
+    Line::new(px(b, 0.36, 0.18), px(b, 0.14, 0.36))
+        .into_styled(SLEEVE)
         .draw(d)?;
-    Circle::new(px(b, 0.5, 0.08), 7).into_styled(ON).draw(d)?;
+    Line::new(px(b, 0.64, 0.18), px(b, 0.86, 0.36))
+        .into_styled(SLEEVE)
+        .draw(d)?;
+    Circle::new(px(b, 0.5, 0.12), 7)
+        .into_styled(CARVE)
+        .draw(d)?;
     Ok(())
 }
 
@@ -366,32 +387,25 @@ fn draw_battery<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     pct: Option<u8>,
 ) -> Result<(), D::Error> {
-    let (bx, by) = (158, 160);
-    Rectangle::with_corners(Point::new(bx, by), Point::new(bx + 21, by + 9))
+    let (bx, by) = (160, 162);
+    Rectangle::with_corners(Point::new(bx, by), Point::new(bx + 27, by + 12))
         .into_styled(ON)
         .draw(d)?;
-    Rectangle::with_corners(Point::new(bx + 22, by + 2), Point::new(bx + 24, by + 7))
+    Rectangle::with_corners(Point::new(bx + 28, by + 3), Point::new(bx + 30, by + 9))
         .into_styled(FILL)
         .draw(d)?;
     if let Some(pct) = pct {
-        let inner = (18 * pct.min(100) as u32) / 100;
+        let inner = (24 * pct.min(100) as u32) / 100;
         if inner > 0 {
             Rectangle::with_corners(
                 Point::new(bx + 2, by + 2),
-                Point::new(bx + 1 + inner as i32, by + 7),
+                Point::new(bx + 1 + inner as i32, by + 10),
             )
             .into_styled(FILL)
             .draw(d)?;
         }
     }
-    let label = match pct {
-        Some(pct) => format!("{pct}%"),
-        None => "--%".to_string(),
-    };
-    let style = MonoTextStyle::new(&FONT_6X12, BinaryColor::On);
-    Text::new(&label, Point::new(bx - 2, by + 12), style)
-        .draw(d)
-        .map(|_| ())
+    Ok(())
 }
 
 fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
