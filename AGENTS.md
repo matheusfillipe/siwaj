@@ -64,7 +64,7 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - Dependencies: firmware declares only what firmware names (shared crates enter via the `siwaj-core` path dependency); unused deps are removed when the compiler stops naming them.
 
 ## Conventions
-- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`, then restarts into weather mode (3s grace so the response flushes). Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
+- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`; the real device (esp32s3) then restarts into weather mode (3s grace so the response flushes), while the esp32 emulator build just keeps serving with the new config. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
 - `schemaVersion` is the payload shape version; `siwaj-core::migrate` is the single gate. Bump it only with a migration path there.
 - Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.

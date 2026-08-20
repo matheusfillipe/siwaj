@@ -70,8 +70,13 @@ fn assemble_config(
     Ok(config)
 }
 
-/// The saved config only takes effect on a fresh boot, so an accepted POST
-/// restarts the device; the grace lets the HTTP response flush first.
+/// The saved config only takes effect on a fresh boot of the real device
+/// (it must leave config mode into the weather cycle), so an accepted POST
+/// restarts after a grace window that lets the HTTP response flush. The
+/// esp32/QEMU build skips it: it always serves config mode and re-reads NVS
+/// per request, and QEMU's esp_restart leaves the emulated SoC in a state
+/// its next boot crashes on.
+#[cfg(esp32s3)]
 fn reboot_soon() {
     std::thread::Builder::new()
         .name("reboot".to_string())
@@ -158,6 +163,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         store.save(&config)?;
         log::info!("config saved, revision {}", config.revision);
         serve_json(req, &config)?;
+        #[cfg(esp32s3)]
         reboot_soon();
         Ok(())
     })?;

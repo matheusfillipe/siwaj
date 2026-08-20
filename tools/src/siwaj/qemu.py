@@ -138,8 +138,11 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
     stop(pid_file)
 
     # QEMU writes NVS straight into the flash image: run a working copy so the
-    # build artifact stays pristine and device state persists across restarts
-    shutil.copyfile(image, device_image)
+    # build artifact stays pristine. The copy is kept across runs so the
+    # emulated device holds its config like the real one; the e2e deletes it
+    # to force the first-setup path.
+    if not device_image.is_file():
+        shutil.copyfile(image, device_image)
 
     cmd = base_cmd(
         device_image,
@@ -173,6 +176,7 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
             print(f"  serial  : socket://127.0.0.1:{SERIAL_TCP_PORT} (make qemu-provision)")
             print(f"  log     : {log_file}")
             print("  stop    : make qemu-stop")
+            load_env_secrets()
             return 0
         time.sleep(2)
     print(
@@ -192,6 +196,22 @@ def stop(pid_file: Path) -> int:
     pid_file.unlink(missing_ok=True)
     print("qemu dev device stopped")
     return 0
+
+
+def load_env_secrets() -> None:
+    """Push .env secrets over the emulated serial port so the device is ready
+    without a separate provision step; skipped when .env is absent (e.g. CI)."""
+    from siwaj.provision import load_env, provision
+
+    env_path = REPO_ROOT / ".env"
+    if not env_path.is_file() or not load_env(env_path):
+        print("  secrets : no .env; set them later with `make qemu-provision`")
+        return
+    rc = provision(f"socket://127.0.0.1:{SERIAL_TCP_PORT}", env_path)
+    if rc == 0:
+        print("  secrets : loaded from .env")
+    else:
+        print("  secrets : provisioning failed; retry with `make qemu-provision`")
 
 
 def main() -> int:
