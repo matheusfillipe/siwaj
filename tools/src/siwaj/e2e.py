@@ -70,6 +70,17 @@ def await_change(path: str, previous: bytes, timeout: float = 30.0) -> tuple[int
     return status, body, face
 
 
+def wait_for_http(up: bool, timeout: float = 20.0) -> bool:
+    """The device notices a state change on its own one-second tick, so the
+    port follows the command rather than arriving with it."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if qemu.http_up(HTTP_PORT) == up:
+            return True
+        time.sleep(1)
+    return False
+
+
 def check(name: str, ok: bool, detail: str = "") -> bool:
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f" ({detail})" if detail else ""))
     return ok
@@ -186,6 +197,20 @@ def main() -> int:
         http_json("POST", "/api/sim", {"charging": False})
         _, unplugged, _ = await_change("/api/frame", plugged)
         results.append(check("unplugging redraws it back", unplugged == frame))
+
+        print("e2e: config mode sleeps and the button wakes it")
+        status, awake = http_json("GET", "/api/status")
+        results.append(
+            check(
+                "GET /api/status -> countdown",
+                status == 200 and isinstance(awake, dict) and awake["secondsUntilSleep"] > 0,
+                str(awake),
+            )
+        )
+        qemu.serial_command("sleep")
+        results.append(check("web ui goes down", wait_for_http(up=False)))
+        qemu.serial_command("button")
+        results.append(check("button brings it back", wait_for_http(up=True)))
 
         print("e2e: invalid input rejected")
         status, _ = http_json(

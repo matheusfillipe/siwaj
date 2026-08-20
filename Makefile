@@ -9,7 +9,7 @@ UV := uv run --project tools
         tools-format tools-format-check tools-lint tools-test \
         firmware-partitions build build-qemu firmware-image firmware-flash firmware-monitor \
         qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-reset \
-        qemu-charge qemu-unplug qemu-provision provision test-e2e \
+        qemu-charge qemu-unplug qemu-sleep qemu-button qemu-provision provision test-e2e \
         ci-host-checks ci-emulator-tests ci-local ci-local-plan \
         all clean
 
@@ -164,6 +164,12 @@ qemu-charge: ## tell the emulated device the charger is plugged in
 
 qemu-unplug: ## tell the emulated device it is back on battery
 	$(UV) python -m siwaj.qemu sim --charging off
+
+qemu-sleep: ## end config mode now; the web ui goes down like the sleeping device
+	$(UV) python -m siwaj.qemu sleep
+
+qemu-button: ## press the emulated BOOT button; config mode and the web ui come back
+	$(UV) python -m siwaj.qemu button
 
 qemu-provision: ## push .env secrets into the emulated device over its serial REPL
 	$(UV) python -m siwaj.provision --port socket://127.0.0.1:47653

@@ -1,9 +1,10 @@
-import { fetchState, submitConfig } from "./api";
+import { fetchState, fetchStatus, submitConfig } from "./api";
 import { loadClientState, saveClientState } from "./store";
 import type { Config } from "./generated/Config";
 import type { ConfigSubmit } from "./generated/ConfigSubmit";
 
 interface Elements {
+  awake: HTMLElement;
   banner: HTMLElement;
   status: HTMLElement;
   form: HTMLFormElement;
@@ -35,6 +36,7 @@ const STEP = 0.5;
 
 function elements(): Elements {
   return {
+    awake: document.getElementById("awake") as HTMLElement,
     banner: document.getElementById("banner") as HTMLElement,
     status: document.getElementById("status") as HTMLElement,
     form: document.getElementById("config-form") as HTMLFormElement,
@@ -55,6 +57,28 @@ function elements(): Elements {
     bandShirt: document.getElementById("bandShirt") as HTMLElement,
     bandTshirt: document.getElementById("bandTshirt") as HTMLElement,
   };
+}
+
+function clock(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  return `${mins}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/// The device serves this page only while config mode is awake, so losing it
+/// is the expected end of a session, not a fault.
+function watchAwake(el: Elements): void {
+  const tick = async (): Promise<void> => {
+    const status = await fetchStatus();
+    if (status === null) {
+      el.awake.textContent = "Asleep. Hold the button to bring the page back.";
+      el.awake.classList.add("asleep");
+      return;
+    }
+    el.awake.textContent = `Awake for ${clock(status.secondsUntilSleep)}`;
+    el.awake.classList.remove("asleep");
+  };
+  void tick();
+  window.setInterval(() => void tick(), 5000);
 }
 
 function setStatus(el: Elements, message: string, isError = false): void {
@@ -179,6 +203,7 @@ function main(): void {
   }
   el.rain.addEventListener("input", () => updateOutputs(el));
   el.form.addEventListener("submit", (event) => void onSave(el, event));
+  watchAwake(el);
   sync(el).catch((err: unknown) => {
     setStatus(el, err instanceof Error ? err.message : "device unreachable", true);
   });

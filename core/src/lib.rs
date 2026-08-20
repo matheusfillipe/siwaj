@@ -80,6 +80,19 @@ pub struct WeatherProbe {
     pub timezone_offset_secs: i32,
 }
 
+/// How long config mode keeps serving after the last request. Long enough to
+/// finish a setup, short enough that a stray button press does not hold the
+/// radio on until the battery is flat.
+pub const CONFIG_MODE_IDLE: core::time::Duration = core::time::Duration::from_secs(10 * 60);
+
+/// What the config page needs to say whether the device is about to drop off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DeviceStatus {
+    pub seconds_until_sleep: u32,
+}
+
 /// Inputs the emulator has no hardware for. Only the QEMU build accepts
 /// these; the device reads the real sense lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

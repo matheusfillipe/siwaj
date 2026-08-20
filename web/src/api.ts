@@ -1,8 +1,21 @@
 import type { ConfigState } from "./generated/ConfigState";
 import type { Config } from "./generated/Config";
 import type { ConfigSubmit } from "./generated/ConfigSubmit";
+import type { DeviceStatus } from "./generated/DeviceStatus";
 
 export type ServerState = ConfigState;
+
+/// Null means the device stopped answering, which in config mode means it
+/// went back to sleep rather than that anything failed.
+export async function fetchStatus(): Promise<DeviceStatus | null> {
+  try {
+    const res = await fetch("/api/status");
+    if (!res.ok) return null;
+    return (await res.json()) as DeviceStatus;
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchState(): Promise<ServerState> {
   const res = await fetch("/api/config");

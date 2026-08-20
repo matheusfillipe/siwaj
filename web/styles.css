@@ -79,6 +79,27 @@ h1 {
 
 .status.error { color: var(--danger); }
 
+.awake {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.awake::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.awake.asleep { color: var(--danger); }
+.awake.asleep::before { background: var(--danger); }
+
 form { display: grid; gap: 0.65rem; }
 
 label { font-size: 0.9rem; color: var(--muted); }
@@ -143,7 +164,7 @@ input[type="range"] {
   align-items: center;
   gap: 0.1rem;
   min-width: 0;
-  padding: 0.2rem 0.1rem;
+  padding: 0.2rem 0.05rem;
   flex-basis: 0;
   border-right: 1px solid var(--card);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -161,8 +182,9 @@ input[type="range"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
-  line-height: 1.2;
+  font-size: 0.65rem;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .band-name { font-weight: 600; }

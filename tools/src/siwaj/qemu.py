@@ -168,8 +168,10 @@ def http_up(http_port: int) -> bool:
     import urllib.error
     import urllib.request
 
+    # /api/status is the one endpoint that does not count as activity, so
+    # polling for liveness cannot itself hold config mode open
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{http_port}/api/config", timeout=3) as resp:
+        with urllib.request.urlopen(f"http://127.0.0.1:{http_port}/api/status", timeout=3) as resp:
             return resp.status == 200
     except (urllib.error.URLError, OSError):
         return False
@@ -257,6 +259,32 @@ def sim(charging: bool) -> int:
         return 1
 
 
+def serial_command(command: str) -> int:
+    """Speaks the device's serial REPL, which answers whether or not the HTTP
+    server is up. That is what makes it the only way to wake a device that
+    has stopped serving."""
+    import serial
+
+    try:
+        conn = serial.serial_for_url(f"socket://127.0.0.1:{SERIAL_TCP_PORT}", 115200, timeout=1)
+    except (serial.SerialException, OSError) as err:
+        print(f"serial: {err}; is `make qemu-run` up?", file=sys.stderr)
+        return 1
+    try:
+        conn.reset_input_buffer()
+        conn.write(f"{command}\n".encode())
+        deadline = time.monotonic() + 10.0
+        reply = ""
+        while time.monotonic() < deadline:
+            reply += conn.read_until(b"\n").decode(errors="replace")
+            if "OK" in reply or "ERR" in reply:
+                break
+        print(f"{command}: {reply.strip() or 'no reply'}")
+        return 0 if "OK" in reply else 1
+    finally:
+        conn.close()
+
+
 def stop(pid_file: Path) -> int:
     if not pid_file.is_file():
         return 0
@@ -286,7 +314,7 @@ def load_env_secrets() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["smoke", "serve", "stop", "sim"])
+    parser.add_argument("command", choices=["smoke", "serve", "stop", "sim", "button", "sleep"])
     parser.add_argument("image", type=Path, nargs="?", help="merged flash image")
     parser.add_argument(
         "--charging",
@@ -300,6 +328,8 @@ def main() -> int:
 
     if args.command == "stop":
         return stop(RUN_DIR / "qemu.pid")
+    if args.command in {"button", "sleep"}:
+        return serial_command(args.command)
     if args.command == "sim":
         if args.charging is None:
             parser.error("sim needs --charging on|off")

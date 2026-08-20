@@ -141,6 +141,19 @@ fn repl_loop(secrets: &'static Secrets) {
                 }
                 out
             }
+            // The emulator has no BOOT button and cannot deep sleep under
+            // QEMU, so the serial line stands in for both. Serial stays up
+            // when the HTTP server is down, which is the whole point.
+            #[cfg(esp32)]
+            (Some("button"), None, None) => {
+                crate::press_button();
+                "OK button".to_string()
+            }
+            #[cfg(esp32)]
+            (Some("sleep"), None, None) => {
+                crate::force_sleep();
+                "OK sleeping".to_string()
+            }
             _ => "ERR usage: set KEY VAL | get KEY | del KEY | keys".to_string(),
         };
         println!("{reply}");

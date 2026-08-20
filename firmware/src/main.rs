@@ -187,12 +187,47 @@ fn run_config_mode(
     }
     #[cfg(esp32)]
     frame::spawn_loop(store, secrets_store);
-    let server = server::start(store, secrets_store)?;
     core::mem::forget(net);
-    core::mem::forget(server);
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(3600));
+
+    // The device sleeps once the page goes quiet and wakes in weather mode,
+    // so config mode ends here. The emulator cannot sleep, so it parks on the
+    // serial line and serves again on the next button press.
+    #[cfg(esp32s3)]
+    {
+        serve_until_idle(store, secrets_store)?;
+        let refresh = store
+            .load()
+            .ok()
+            .flatten()
+            .map(|config| config.refresh_interval())
+            .unwrap_or(WAKE_INTERVAL);
+        deep_sleep(refresh);
     }
+    #[cfg(esp32)]
+    loop {
+        serve_until_idle(store, secrets_store)?;
+        wait_for_button();
+    }
+}
+
+/// Holds the config port open until the page goes quiet. Serving is what
+/// costs the battery in this mode, so the window is idle-based rather than
+/// fixed: an active setup keeps it alive, an abandoned one lets it close.
+fn serve_until_idle(
+    store: &'static store::Store,
+    secrets_store: &'static secrets::Secrets,
+) -> anyhow::Result<()> {
+    let server = server::start(store, secrets_store)?;
+    touch();
+    while idle_for() < siwaj_core::CONFIG_MODE_IDLE {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    drop(server);
+    log::info!(
+        "config mode idle for {}s; stopping the server",
+        siwaj_core::CONFIG_MODE_IDLE.as_secs()
+    );
+    Ok(())
 }
 
 /// The esp32s3 peripherals the weather cycle consumes, grouped so the cycle
@@ -268,6 +303,48 @@ pub(crate) fn weather_view(
             )
         }
     }
+}
+
+/// When config mode last saw a request. The window is idle-based so a long
+/// setup never has the page vanish mid-edit, while an untouched device still
+/// stops serving and lets the radio go quiet.
+static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+pub(crate) fn touch() {
+    *LAST_REQUEST.lock().expect("activity lock") = Some(std::time::Instant::now());
+}
+
+pub(crate) fn idle_for() -> std::time::Duration {
+    LAST_REQUEST
+        .lock()
+        .expect("activity lock")
+        .map(|at| at.elapsed())
+        .unwrap_or_default()
+}
+
+/// The emulator cannot deep sleep under QEMU, so it stands the wake-up in:
+/// the serial `button` command plays the part of the BOOT button the real
+/// device reads from GPIO0 at boot.
+#[cfg(esp32)]
+static BUTTON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(esp32)]
+pub(crate) fn press_button() {
+    BUTTON.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(esp32)]
+pub(crate) fn force_sleep() {
+    *LAST_REQUEST.lock().expect("activity lock") =
+        std::time::Instant::now().checked_sub(siwaj_core::CONFIG_MODE_IDLE);
+}
+
+#[cfg(esp32)]
+fn wait_for_button() {
+    while !BUTTON.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    log::info!("button pressed: serving config mode again");
 }
 
 pub(crate) fn now_unix() -> u32 {

@@ -120,7 +120,20 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         serve_gz(req, APP_GZ, "text/javascript")
     })?;
 
+    // Deliberately does not count as activity: an open page polls this, and
+    // watching the countdown must not be what stops it reaching zero.
+    server.fn_handler::<AnyError, _>("/api/status", Method::Get, |req| {
+        let left = siwaj_core::CONFIG_MODE_IDLE.saturating_sub(crate::idle_for());
+        serve_json(
+            req,
+            &siwaj_core::DeviceStatus {
+                seconds_until_sleep: left.as_secs() as u32,
+            },
+        )
+    })?;
+
     server.fn_handler::<AnyError, _>("/api/config", Method::Get, |req| {
+        crate::touch();
         let config = match store.load() {
             Ok(config) => config,
             Err(e) => {
@@ -137,6 +150,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/api/config", Method::Post, |mut req| {
+        crate::touch();
         let len = req.content_len().unwrap_or(0) as usize;
         if len == 0 || len > 2048 {
             let mut resp = req.into_status_response(400)?;
