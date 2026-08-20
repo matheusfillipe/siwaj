@@ -4,7 +4,9 @@ use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 
 use crate::secrets::{SecretKey, Secrets};
 
-pub use siwaj_core::weather::{parse_geocode, parse_one_call, Snapshot};
+pub use siwaj_core::weather::{Snapshot, merge_minutely, parse_geocode, parse_hourly};
+
+const ONE_CALL: &str = "https://api.openweathermap.org/data/4.0/onecall";
 
 fn http_get(url: &str) -> anyhow::Result<Vec<u8>> {
     let config = HttpConfig {
@@ -30,15 +32,25 @@ fn http_get(url: &str) -> anyhow::Result<Vec<u8>> {
     Ok(body)
 }
 
+/// One Call 4.0 serves each resolution from its own endpoint, so a cycle
+/// spends two requests: the hourly timeline carries the temperature, the rain
+/// probability and the zone offset, the 1-minute timeline the precipitation
+/// trace that decides rain within the hour.
 pub fn fetch(secrets: &Secrets, lat: f64, lon: f64) -> anyhow::Result<Snapshot> {
     let key = secrets
         .get(SecretKey::OpenWeatherApiKey)
         .context("no OPENWEATHER_API_KEY provisioned")?;
-    let url = format!(
-        "https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&exclude=daily,alerts&units=metric&appid={key}"
-    );
-    let body = http_get(&url)?;
-    parse_one_call(&body).map_err(anyhow::Error::msg)
+    let hourly = http_get(&format!(
+        "{ONE_CALL}/timeline/1h?lat={lat}&lon={lon}&units=metric&appid={key}"
+    ))
+    .context("hourly timeline")?;
+    let mut snapshot = parse_hourly(&hourly).map_err(anyhow::Error::msg)?;
+    let minutely = http_get(&format!(
+        "{ONE_CALL}/timeline/1min?lat={lat}&lon={lon}&appid={key}"
+    ))
+    .context("minutely timeline")?;
+    merge_minutely(&mut snapshot, &minutely).map_err(anyhow::Error::msg)?;
+    Ok(snapshot)
 }
 
 pub fn geocode(secrets: &Secrets, city: &str) -> anyhow::Result<(f64, f64)> {

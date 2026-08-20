@@ -1,5 +1,10 @@
-//! OpenWeather One Call payload parsing, host-testable and shared with the
-//! firmware. The firmware keeps only the HTTP transport shell.
+//! OpenWeather One Call 4.0 payload parsing, host-testable and shared with
+//! the firmware. The firmware keeps only the HTTP transport shell.
+//!
+//! 4.0 splits what one request used to return across per-resolution timeline
+//! endpoints, so a cycle reads the hourly timeline for the temperature, the
+//! rain probability and the zone offset, then the 1-minute timeline for the
+//! precipitation trace. Both fold into one `Snapshot`.
 
 use serde::Deserialize;
 
@@ -33,27 +38,21 @@ impl Snapshot {
 }
 
 #[derive(Deserialize)]
-struct OneCall {
-    current: Current,
-    minutely: Option<Vec<Minutely>>,
-    hourly: Option<Vec<Hourly>>,
+struct Timeline<T> {
+    data: Vec<T>,
     #[serde(default)]
     timezone_offset: i32,
 }
 
 #[derive(Deserialize)]
-struct Current {
+struct HourStep {
     feels_like: f32,
-}
-
-#[derive(Deserialize)]
-struct Minutely {
-    precipitation: Option<f32>,
-}
-
-#[derive(Deserialize)]
-struct Hourly {
     pop: Option<f32>,
+}
+
+#[derive(Deserialize)]
+struct MinuteStep {
+    precipitation: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -62,24 +61,34 @@ struct GeoHit {
     lon: f64,
 }
 
-/// Parses a One Call response body. Err carries a short reason suitable for logs.
-pub fn parse_one_call(body: &[u8]) -> Result<Snapshot, String> {
-    let parsed: OneCall =
-        serde_json::from_slice(body).map_err(|e| format!("one call payload: {e}"))?;
-    let mut snapshot = Snapshot {
-        feels_like_c: parsed.current.feels_like,
+/// Parses a `onecall/timeline/1h` body into the part of a snapshot that does
+/// not involve precipitation. `data[0]` is the current hour bucket, so its
+/// `feels_like` is the hour's value rather than an instantaneous reading.
+/// Err carries a short reason suitable for logs.
+pub fn parse_hourly(body: &[u8]) -> Result<Snapshot, String> {
+    let parsed: Timeline<HourStep> =
+        serde_json::from_slice(body).map_err(|e| format!("hourly timeline payload: {e}"))?;
+    let current = parsed
+        .data
+        .first()
+        .ok_or_else(|| "hourly timeline carries no steps".to_string())?;
+    Ok(Snapshot {
+        feels_like_c: current.feels_like,
+        next_hour_pop_frac: current.pop.unwrap_or(0.0),
         timezone_offset_secs: parsed.timezone_offset,
         ..Default::default()
-    };
-    if let Some(minutely) = parsed.minutely {
-        for (slot, entry) in snapshot.minutely_mm.iter_mut().zip(minutely) {
-            *slot = entry.precipitation.unwrap_or(0.0);
-        }
+    })
+}
+
+/// Folds a `onecall/timeline/1min` body into a snapshot. A short trace pads
+/// with zero: fewer steps means no forecast for those minutes, not rain.
+pub fn merge_minutely(snapshot: &mut Snapshot, body: &[u8]) -> Result<(), String> {
+    let parsed: Timeline<MinuteStep> =
+        serde_json::from_slice(body).map_err(|e| format!("minutely timeline payload: {e}"))?;
+    for (slot, step) in snapshot.minutely_mm.iter_mut().zip(parsed.data) {
+        *slot = step.precipitation.unwrap_or(0.0);
     }
-    if let Some(hourly) = parsed.hourly {
-        snapshot.next_hour_pop_frac = hourly.first().and_then(|h| h.pop).unwrap_or(0.0);
-    }
-    Ok(snapshot)
+    Ok(())
 }
 
 /// Parses a geocoding /direct response body, returning the first hit.
@@ -111,42 +120,68 @@ pub fn urlencode(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn full_payload() -> serde_json::Value {
+    /// Shaped after a live `onecall/timeline/1h` response, trimmed to the
+    /// fields the parser names.
+    fn hourly_payload() -> serde_json::Value {
+        serde_json::json!({
+            "lat": 52.2096,
+            "lon": 7.1886,
+            "timezone": "Europe/Berlin",
+            "timezone_offset": 3600,
+            "data": [
+                {"dt": 1787252400, "temp": 18.0, "feels_like": 17.5, "humidity": 85, "pop": 0.25},
+                {"dt": 1787256000, "temp": 17.0, "feels_like": 16.4, "humidity": 88, "pop": 0.9}
+            ]
+        })
+    }
+
+    fn minutely_payload(wet_minute: usize) -> serde_json::Value {
         serde_json::json!({
             "timezone_offset": 3600,
-            "current": {"feels_like": 17.5},
-            "minutely": (0..60).map(|i| serde_json::json!({"precipitation": if i == 5 { 0.4 } else { 0.0 }})).collect::<Vec<_>>(),
-            "hourly": [{"pop": 0.25}, {"pop": 0.9}]
+            "data": (0..60)
+                .map(|i| serde_json::json!({
+                    "dt": 1787252940 + i * 60,
+                    "precipitation": if i == wet_minute as i64 { 0.4 } else { 0.0 }
+                }))
+                .collect::<Vec<_>>()
         })
     }
 
     #[test]
-    fn parses_full_payload() {
-        let body = serde_json::to_vec(&full_payload()).unwrap();
-        let snap = parse_one_call(&body).unwrap();
+    fn parses_both_timelines_into_one_snapshot() {
+        let mut snap = parse_hourly(&serde_json::to_vec(&hourly_payload()).unwrap()).unwrap();
         assert_eq!(snap.feels_like_c, 17.5);
         assert_eq!(snap.timezone_offset_secs, 3600);
         assert_eq!(snap.next_hour_pop_frac, 0.25);
+        assert!(snap.minutely_mm.iter().all(|&mm| mm == 0.0));
+
+        merge_minutely(
+            &mut snap,
+            &serde_json::to_vec(&minutely_payload(5)).unwrap(),
+        )
+        .unwrap();
         assert_eq!(snap.minutely_mm[5], 0.4);
-        assert_eq!(snap.minutely_mm.len(), 60);
+        assert_eq!(snap.minutely_mm.len(), MINUTELY_LEN);
+        assert_eq!(snap.feels_like_c, 17.5, "merging must not disturb the hour");
+
         let rain = snap.rain_outlook();
         assert_eq!(rain.pop_pct_next_hour, 25);
         assert!(rain.rain_expected);
     }
 
     #[test]
-    fn missing_minutely_and_hourly_defaults_to_zero() {
-        let body = br#"{"current": {"feels_like": 3.0}}"#;
-        let snap = parse_one_call(body).unwrap();
+    fn hourly_without_pop_reads_as_zero() {
+        let body = br#"{"timezone_offset": 0, "data": [{"feels_like": 3.0}]}"#;
+        let snap = parse_hourly(body).unwrap();
         assert_eq!(snap.feels_like_c, 3.0);
         assert_eq!(snap.next_hour_pop_frac, 0.0);
-        assert!(snap.minutely_mm.iter().all(|&mm| mm == 0.0));
+        assert!(!snap.rain_outlook().rain_expected);
     }
 
     #[test]
-    fn short_minutely_list_pads_with_zero() {
-        let body = br#"{"current": {"feels_like": 1.0}, "minutely": [{"precipitation": 0.7}]}"#;
-        let snap = parse_one_call(body).unwrap();
+    fn short_minutely_trace_pads_with_zero() {
+        let mut snap = Snapshot::default();
+        merge_minutely(&mut snap, br#"{"data": [{"precipitation": 0.7}]}"#).unwrap();
         assert_eq!(snap.minutely_mm[0], 0.7);
         assert!(snap.minutely_mm[1..].iter().all(|&mm| mm == 0.0));
         assert!(snap.rain_outlook().rain_expected);
@@ -154,16 +189,29 @@ mod tests {
 
     #[test]
     fn null_precipitation_reads_as_zero() {
-        let body = br#"{"current": {"feels_like": 1.0}, "minutely": [{"precipitation": null}]}"#;
-        let snap = parse_one_call(body).unwrap();
+        let mut snap = Snapshot::default();
+        merge_minutely(&mut snap, br#"{"data": [{"precipitation": null}]}"#).unwrap();
         assert_eq!(snap.minutely_mm[0], 0.0);
         assert!(!snap.rain_outlook().rain_expected);
     }
 
     #[test]
-    fn malformed_body_is_rejected() {
-        assert!(parse_one_call(b"not json").is_err());
-        assert!(parse_one_call(br#"{"no_current": true}"#).is_err());
+    fn malformed_bodies_are_rejected() {
+        assert!(parse_hourly(b"not json").is_err());
+        assert!(
+            parse_hourly(br#"{"data": []}"#).is_err(),
+            "no steps is an error, not a zeroed frame"
+        );
+        assert!(parse_hourly(br#"{"no_data": true}"#).is_err());
+        assert!(merge_minutely(&mut Snapshot::default(), b"not json").is_err());
+    }
+
+    #[test]
+    fn a_failed_merge_leaves_the_hourly_half_intact() {
+        let mut snap = parse_hourly(&serde_json::to_vec(&hourly_payload()).unwrap()).unwrap();
+        assert!(merge_minutely(&mut snap, b"{{{").is_err());
+        assert_eq!(snap.feels_like_c, 17.5);
+        assert_eq!(snap.next_hour_pop_frac, 0.25);
     }
 
     #[test]
