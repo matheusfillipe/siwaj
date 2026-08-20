@@ -60,12 +60,12 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - Every `unsafe` block carries a `// SAFETY:` comment saying why it is sound. GPIO steals and deep-sleep register calls included.
 - `make check-firmware` clippy `-D warnings` on both firmware targets is part of every change, like `make check` for host code. Fix warnings, never silence them.
 - Render changes ship with updated snapshot fixtures (`make core-snapshots`) when intentional; a changed diff without a fixture update is a bug.
-- Firmware wake paths must always terminate in deep sleep; an error path that leaves the radio on is a battery bug, not a style issue.
+- Firmware wake paths must always terminate in deep sleep; an error path that leaves the radio on is a battery bug, not a style issue. The s3 weather cycle runs under a 120s watchdog thread that force-sleeps a hung cycle, and wifi bring-up plus HTTP carry their own deadlines.
 - New public API surface on `Board`/`Store`/`Secrets` starts private; widen only with a consumer in the same change.
 - Dependencies: firmware declares only what firmware names (shared crates enter via the `siwaj-core` path dependency); unused deps are removed when the compiler stops naming them.
 
 ## Conventions
-- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
+- `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`, then restarts into weather mode (3s grace so the response flushes). Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
 - `schemaVersion` is the payload shape version; `siwaj-core::migrate` is the single gate. Bump it only with a migration path there.
 - Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.

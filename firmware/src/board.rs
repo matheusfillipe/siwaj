@@ -117,20 +117,24 @@ mod device {
             Ok(Battery { channel })
         }
 
-        pub fn pct(&mut self) -> u8 {
-            let Ok(mv) = self.channel.read() else {
-                return 0;
+        pub fn pct(&mut self) -> Option<u8> {
+            let mv = match self.channel.read() {
+                Ok(mv) => mv,
+                Err(e) => {
+                    log::warn!("battery adc read failed: {e}");
+                    return None;
+                }
             };
             let volts = mv as f32 * 2.0 / 1000.0;
             const FULL: f32 = 4.12;
             const EMPTY: f32 = 3.0;
             if volts <= EMPTY {
-                return 0;
+                return Some(0);
             }
             if volts >= FULL {
-                return 100;
+                return Some(100);
             }
-            ((volts - EMPTY) / (FULL - EMPTY) * 100.0) as u8
+            Some(((volts - EMPTY) / (FULL - EMPTY) * 100.0) as u8)
         }
     }
 }

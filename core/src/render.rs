@@ -100,7 +100,29 @@ pub struct View {
     pub rain: RainOutlook,
     pub rain_threshold_pct: u8,
     pub updated: TimeOfDay,
-    pub battery_pct: u8,
+    /// None when the ADC read failed; drawn as an empty battery with a "--%"
+    /// label rather than a fabricated charge level.
+    pub battery_pct: Option<u8>,
+    pub offline: bool,
+}
+
+impl View {
+    /// The frame for a failed weather cycle: the safe garment, the clock, and
+    /// the real battery, with no invented weather numbers.
+    pub fn offline(updated: TimeOfDay, battery_pct: Option<u8>) -> View {
+        View {
+            garment: Garment::Jacket,
+            feels_like_c: 0.0,
+            rain: RainOutlook {
+                pop_pct_next_hour: 0,
+                rain_expected: false,
+            },
+            rain_threshold_pct: 0,
+            updated,
+            battery_pct,
+            offline: true,
+        }
+    }
 }
 
 struct Bounds {
@@ -340,7 +362,10 @@ fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
     .map(|_| ())
 }
 
-fn draw_battery<D: DrawTarget<Color = BinaryColor>>(d: &mut D, pct: u8) -> Result<(), D::Error> {
+fn draw_battery<D: DrawTarget<Color = BinaryColor>>(
+    d: &mut D,
+    pct: Option<u8>,
+) -> Result<(), D::Error> {
     let (bx, by) = (158, 160);
     Rectangle::with_corners(Point::new(bx, by), Point::new(bx + 21, by + 9))
         .into_styled(ON)
@@ -348,17 +373,23 @@ fn draw_battery<D: DrawTarget<Color = BinaryColor>>(d: &mut D, pct: u8) -> Resul
     Rectangle::with_corners(Point::new(bx + 22, by + 2), Point::new(bx + 24, by + 7))
         .into_styled(FILL)
         .draw(d)?;
-    let inner = (18 * pct.min(100) as u32) / 100;
-    if inner > 0 {
-        Rectangle::with_corners(
-            Point::new(bx + 2, by + 2),
-            Point::new(bx + 1 + inner as i32, by + 7),
-        )
-        .into_styled(FILL)
-        .draw(d)?;
+    if let Some(pct) = pct {
+        let inner = (18 * pct.min(100) as u32) / 100;
+        if inner > 0 {
+            Rectangle::with_corners(
+                Point::new(bx + 2, by + 2),
+                Point::new(bx + 1 + inner as i32, by + 7),
+            )
+            .into_styled(FILL)
+            .draw(d)?;
+        }
     }
+    let label = match pct {
+        Some(pct) => format!("{pct}%"),
+        None => "--%".to_string(),
+    };
     let style = MonoTextStyle::new(&FONT_6X12, BinaryColor::On);
-    Text::new(&format!("{pct}%"), Point::new(bx - 2, by + 12), style)
+    Text::new(&label, Point::new(bx - 2, by + 12), style)
         .draw(d)
         .map(|_| ())
 }
@@ -393,13 +424,17 @@ pub fn render(view: &View) -> Framebuffer {
 
 pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     draw_garment(d, view.garment).ok();
-    let rounded = view.feels_like_c.round() as i32;
-    let temp = format!("{rounded}\u{00b0}");
-    let cell = 9;
-    let w = big_text_width(&temp, cell);
-    draw_big_text(d, Point::new((WIDTH as i32 - w) / 2, 96), &temp, cell).ok();
-    centered_small(d, WIDTH as i32 / 2, 150, "feels like").ok();
-    draw_rain_badge(d, view).ok();
+    if view.offline {
+        centered_small(d, WIDTH as i32 / 2, 108, "offline").ok();
+    } else {
+        let rounded = view.feels_like_c.round() as i32;
+        let temp = format!("{rounded}\u{00b0}");
+        let cell = 9;
+        let w = big_text_width(&temp, cell);
+        draw_big_text(d, Point::new((WIDTH as i32 - w) / 2, 96), &temp, cell).ok();
+        centered_small(d, WIDTH as i32 / 2, 150, "feels like").ok();
+        draw_rain_badge(d, view).ok();
+    }
     draw_battery(d, view.battery_pct).ok();
     draw_updated(d, view.updated).ok();
 }

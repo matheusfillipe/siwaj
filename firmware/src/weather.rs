@@ -10,6 +10,7 @@ fn http_get(url: &str) -> anyhow::Result<Vec<u8>> {
     let config = HttpConfig {
         buffer_size: Some(2048),
         buffer_size_tx: Some(1024),
+        timeout: Some(core::time::Duration::from_secs(20)),
         crt_bundle_attach: Some(esp_idf_svc::sys::esp_crt_bundle_attach),
         ..Default::default()
     };
@@ -24,6 +25,7 @@ fn http_get(url: &str) -> anyhow::Result<Vec<u8>> {
             break;
         }
         body.extend_from_slice(&chunk[..n]);
+        anyhow::ensure!(body.len() <= 128 * 1024, "response larger than 128KiB");
     }
     Ok(body)
 }
@@ -39,12 +41,14 @@ pub fn fetch(secrets: &Secrets, lat: f64, lon: f64) -> anyhow::Result<Snapshot> 
     parse_one_call(&body).map_err(anyhow::Error::msg)
 }
 
-pub fn geocode(secrets: &Secrets, city: &str) -> Option<(f64, f64)> {
-    let key = secrets.get(SecretKey::OpenWeatherApiKey)?;
+pub fn geocode(secrets: &Secrets, city: &str) -> anyhow::Result<(f64, f64)> {
+    let key = secrets
+        .get(SecretKey::OpenWeatherApiKey)
+        .context("no OPENWEATHER_API_KEY provisioned")?;
     let url = format!(
         "https://api.openweathermap.org/geo/1.0/direct?q={}&limit=1&appid={key}",
         siwaj_core::weather::urlencode(city)
     );
-    let body = http_get(&url).ok()?;
-    parse_geocode(&body)
+    let body = http_get(&url)?;
+    parse_geocode(&body).map_err(anyhow::Error::msg)
 }

@@ -83,9 +83,14 @@ pub fn parse_one_call(body: &[u8]) -> Result<Snapshot, String> {
 }
 
 /// Parses a geocoding /direct response body, returning the first hit.
-pub fn parse_geocode(body: &[u8]) -> Option<(f64, f64)> {
-    let hits: Vec<GeoHit> = serde_json::from_slice(body).ok()?;
-    hits.first().map(|h| (h.lat, h.lon))
+/// Err carries a short reason suitable for logs and 422 bodies.
+pub fn parse_geocode(body: &[u8]) -> Result<(f64, f64), String> {
+    let hits: Vec<GeoHit> =
+        serde_json::from_slice(body).map_err(|e| format!("geocode payload: {e}"))?;
+    let Some(first) = hits.first() else {
+        return Err("no match for that city name".to_string());
+    };
+    Ok((first.lat, first.lon))
 }
 
 /// Percent-encodes a city name for a query string.
@@ -164,9 +169,17 @@ mod tests {
     #[test]
     fn geocode_takes_first_hit() {
         let body = br#"[{"lat": 52.5, "lon": 13.4}, {"lat": 1.0, "lon": 2.0}]"#;
-        assert_eq!(parse_geocode(body), Some((52.5, 13.4)));
-        assert_eq!(parse_geocode(b"[]"), None);
-        assert_eq!(parse_geocode(b"{}"), None);
+        assert_eq!(parse_geocode(body), Ok((52.5, 13.4)));
+    }
+
+    #[test]
+    fn geocode_distinguishes_failure_modes() {
+        assert_eq!(
+            parse_geocode(b"[]"),
+            Err("no match for that city name".to_string())
+        );
+        assert!(parse_geocode(b"{}").is_err());
+        assert!(parse_geocode(b"").is_err());
     }
 
     #[test]

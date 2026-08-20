@@ -20,7 +20,8 @@ fn view(garment: Garment, pop: u8, expected: bool, feels: f32) -> View {
             hour: 14,
             minute: 32,
         },
-        battery_pct: 87,
+        battery_pct: Some(87),
+        offline: false,
     }
 }
 
@@ -41,6 +42,10 @@ fn cases() -> Vec<(&'static str, View)> {
         (
             "4: t-shirt, 24C, dry",
             view(Garment::TShirt, 0, false, 24.0),
+        ),
+        (
+            "5: offline, safe jacket",
+            View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41)),
         ),
     ]
 }
@@ -70,7 +75,7 @@ fn main() {
 
     let cases = cases();
     let mut index = 0usize;
-    let mut window = Window::new("siwaj [1-4 garment, q quit]", &output_settings);
+    let mut window = Window::new("siwaj [1-5 frame, q quit]", &output_settings);
 
     loop {
         window.update(&draw(&cases[index].1));
@@ -85,6 +90,7 @@ fn main() {
                             Keycode::Num2 => Some(2),
                             Keycode::Num3 => Some(3),
                             Keycode::Num4 => Some(4),
+                            Keycode::Num5 => Some(5),
                             _ => None,
                         };
                         if let Some(n) = digit {

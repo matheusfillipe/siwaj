@@ -15,6 +15,12 @@ mod weather;
 #[cfg(esp32s3)]
 const WAKE_INTERVAL_SECS: u64 = 30 * 60;
 
+/// Budget for one weather cycle: wifi bring-up, sntp, the One Call fetch,
+/// and the e-paper update, with margin. The watchdog forces deep sleep if a
+/// hung step (stalled DHCP or TLS read) would otherwise drain the battery.
+#[cfg(esp32s3)]
+const CYCLE_BUDGET_SECS: u64 = 120;
+
 // deep_sleep diverges, so the trailing Ok(()) is unreachable on esp32s3
 #[cfg_attr(esp32s3, allow(unreachable_code))]
 fn main() -> anyhow::Result<()> {
@@ -122,13 +128,18 @@ fn main() -> anyhow::Result<()> {
         // every wake must terminate in deep sleep; a failed cycle only costs
         // one stale frame, staying awake would cost the battery
         if let Some(config) = config.as_ref() {
+            arm_cycle_watchdog(config.refresh_minutes as u64 * 60);
             if let Err(e) =
                 run_weather_cycle(hardware, sys_loop, nvs_partition, config, secrets_store)
             {
                 log::error!("weather cycle failed: {e}");
             }
         }
-        deep_sleep(config);
+        let refresh_secs = config
+            .as_ref()
+            .map(|c| c.refresh_minutes as u64 * 60)
+            .unwrap_or(WAKE_INTERVAL_SECS);
+        deep_sleep(refresh_secs);
     }
     #[cfg(esp32)]
     {
@@ -209,10 +220,6 @@ fn run_weather_cycle(
 
     let view = match weather::fetch(secrets_store, config.location.lat, config.location.lon) {
         Ok(snapshot) => {
-            let rain = siwaj_core::RainOutlook::from_one_call(
-                snapshot.next_hour_pop_frac,
-                &snapshot.minutely_mm,
-            );
             let updated = hhmm(
                 now_unix().wrapping_add(snapshot.timezone_offset_secs as u32),
             );
@@ -222,25 +229,16 @@ fn run_weather_cycle(
                     &config.thresholds,
                 ),
                 feels_like_c: snapshot.feels_like_c,
-                rain,
+                rain: snapshot.rain_outlook(),
                 rain_threshold_pct: config.rain_threshold_pct,
                 updated,
                 battery_pct: board.battery.pct(),
+                offline: false,
             }
         }
         Err(e) => {
-            log::warn!("weather fetch failed: {e}; drawing fallback");
-            siwaj_core::render::View {
-                garment: siwaj_core::Garment::Jacket,
-                feels_like_c: 0.0,
-                rain: siwaj_core::RainOutlook {
-                    pop_pct_next_hour: 0,
-                    rain_expected: false,
-                },
-                rain_threshold_pct: config.rain_threshold_pct,
-                updated: hhmm(now_unix()),
-                battery_pct: board.battery.pct(),
-            }
+            log::warn!("weather fetch failed: {e}; drawing offline frame");
+            siwaj_core::render::View::offline(hhmm(now_unix()), board.battery.pct())
         }
     };
     board.draw(&view)?;
@@ -284,10 +282,20 @@ fn hhmm(unix: u32) -> siwaj_core::render::TimeOfDay {
 }
 
 #[cfg(esp32s3)]
-fn deep_sleep(config: Option<siwaj_core::Config>) -> ! {
-    let secs = config
-        .map(|c| c.refresh_minutes as u64 * 60)
-        .unwrap_or(WAKE_INTERVAL_SECS);
+fn arm_cycle_watchdog(refresh_secs: u64) {
+    std::thread::Builder::new()
+        .name("watchdog".to_string())
+        .stack_size(2048)
+        .spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(CYCLE_BUDGET_SECS));
+            log::error!("weather cycle overran {CYCLE_BUDGET_SECS}s; forcing deep sleep");
+            deep_sleep(refresh_secs);
+        })
+        .expect("spawn watchdog");
+}
+
+#[cfg(esp32s3)]
+fn deep_sleep(secs: u64) -> ! {
     log::info!("deep sleeping for {secs}s");
     unsafe { esp_idf_svc::sys::esp_deep_sleep(secs * 1_000_000) }
 }

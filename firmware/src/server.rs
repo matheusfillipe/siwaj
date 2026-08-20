@@ -44,16 +44,11 @@ fn serve_json(
 fn assemble_config(
     store: &Store,
     submit: siwaj_core::ConfigSubmit,
-    geocode: Option<(f64, f64)>,
+    geocode: anyhow::Result<(f64, f64)>,
 ) -> anyhow::Result<siwaj_core::Config> {
     use anyhow::Context;
 
-    let Some((lat, lon)) = geocode else {
-        anyhow::bail!(
-            "could not resolve '{}' to coordinates (is the API key provisioned?)",
-            submit.location_name
-        );
-    };
+    let (lat, lon) = geocode.context("geocoding failed")?;
     let current = store.load().context("stored config unreadable")?;
     let config = siwaj_core::Config {
         schema_version: siwaj_core::CONFIG_SCHEMA_VERSION,
@@ -73,6 +68,20 @@ fn assemble_config(
     };
     config.validate().context("invalid config")?;
     Ok(config)
+}
+
+/// The saved config only takes effect on a fresh boot, so an accepted POST
+/// restarts the device; the grace lets the HTTP response flush first.
+fn reboot_soon() {
+    std::thread::Builder::new()
+        .name("reboot".to_string())
+        .stack_size(2048)
+        .spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            log::info!("restarting into the new config");
+            unsafe { esp_idf_svc::sys::esp_restart() }
+        })
+        .expect("spawn reboot");
 }
 
 pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttpServer<'static>, anyhow::Error> {
@@ -139,13 +148,15 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
             Ok(c) => c,
             Err(e) => {
                 let mut resp = req.into_status_response(422)?;
-                resp.write_all(e.to_string().as_bytes())?;
+                resp.write_all(format!("{e:#}").as_bytes())?;
                 return Ok(());
             }
         };
         store.save(&config)?;
         log::info!("config saved, revision {}", config.revision);
-        serve_json(req, &config)
+        serve_json(req, &config)?;
+        reboot_soon();
+        Ok(())
     })?;
 
     server.fn_handler::<AnyError, _>("/api/weather", Method::Get, |req| {
@@ -158,7 +169,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
             }
             Err(e) => {
                 let mut resp = req.into_status_response(500)?;
-                resp.write_all(e.to_string().as_bytes())?;
+                resp.write_all(format!("{e:#}").as_bytes())?;
                 return Ok(());
             }
         };
@@ -174,7 +185,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
             }
             Err(e) => {
                 let mut resp = req.into_status_response(502)?;
-                resp.write_all(e.to_string().as_bytes())?;
+                resp.write_all(format!("{e:#}").as_bytes())?;
             }
         }
         Ok(())

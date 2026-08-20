@@ -107,9 +107,8 @@ async function onSave(el: Elements, event: SubmitEvent): Promise<void> {
     const config = await submitConfig(readForm(el));
     saveClientState({ revision: config.revision, config });
     fillForm(el, config);
-    setStatus(el, "saved");
+    setStatus(el, "saved, restarting the device...");
     el.banner.classList.add("hidden");
-    setTimeout(() => setStatus(el, ""), 2000);
   } catch (err) {
     setStatus(el, err instanceof Error ? err.message : "save failed", true);
   } finally {

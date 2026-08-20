@@ -60,7 +60,7 @@ pub fn bring_up(
             wifi.set_configuration(&conf)?;
             wifi.start()?;
             wifi.connect()?;
-            wifi.wait_netif_up()?;
+            wait_for_sta_ip(&wifi, 20)?;
             false
         }
         _ => {
@@ -84,6 +84,30 @@ pub fn bring_up(
     let ip_info: IpInfo = netif.get_ip_info()?;
     log::info!("wifi up: {ip_info:?}");
     Ok(NetUp { wifi })
+}
+
+/// wait_netif_up blocks forever on a network that never delivers DHCP, so the
+/// client path polls for an address with a deadline instead; a timed-out
+/// bring_up is an error the cycle reports before sleeping.
+#[cfg(esp32s3)]
+fn wait_for_sta_ip(wifi: &BlockingWifi<EspWifi<'static>>, secs: u64) -> Result<(), anyhow::Error> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        let has_ip = wifi
+            .wifi()
+            .sta_netif()
+            .get_ip_info()
+            .map(|info| info.ip != esp_idf_svc::ipv4::Ipv4Addr::new(0, 0, 0, 0))
+            .unwrap_or(false);
+        if wifi.is_connected().unwrap_or(false) && has_ip {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "wifi did not connect within {secs}s"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
 
 pub fn ip_info(net: &NetUp) -> Option<IpInfo> {
