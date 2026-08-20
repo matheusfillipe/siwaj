@@ -191,7 +191,7 @@ fn draw_pullover<D: DrawTarget<Color = BinaryColor>>(
     Line::new(px(b, 0.64, 0.12), px(b, 0.88, 0.68))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Circle::new(px(b, 0.5, 0.09), 6)
+    Rectangle::with_corners(px(b, 0.41, 0.04), px(b, 0.59, 0.12))
         .into_styled(CARVE)
         .draw(d)?;
     Line::new(px(b, 0.36, 0.86), px(b, 0.64, 0.86))
@@ -222,12 +222,6 @@ fn draw_shirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Resu
     Line::new(px(b, 0.5, 0.26), px(b, 0.5, 0.96))
         .into_styled(CARVE_S1)
         .draw(d)?;
-    Circle::new(px(b, 0.44, 0.44), 1)
-        .into_styled(CARVE)
-        .draw(d)?;
-    Circle::new(px(b, 0.44, 0.64), 1)
-        .into_styled(CARVE)
-        .draw(d)?;
     Ok(())
 }
 
@@ -241,7 +235,7 @@ fn draw_tshirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Res
     Line::new(px(b, 0.64, 0.18), px(b, 0.86, 0.36))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Circle::new(px(b, 0.5, 0.12), 7)
+    Rectangle::with_corners(px(b, 0.40, 0.07), px(b, 0.60, 0.16))
         .into_styled(CARVE)
         .draw(d)?;
     Ok(())
@@ -416,7 +410,7 @@ fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
     let text = format!("{:02}:{:02}", updated.hour, updated.minute);
     let bb = Text::new(&text, Point::zero(), style).bounding_box();
     let x = WIDTH as i32 / 2 - bb.size.width as i32 / 2;
-    Text::new(&text, Point::new(x, 166), style)
+    Text::new(&text, Point::new(x, 176), style)
         .draw(d)
         .map(|_| ())
 }
