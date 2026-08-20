@@ -156,7 +156,24 @@ impl fmt::Display for ConfigError {
 
 impl Error for ConfigError {}
 
+/// How soon to re-fetch after a cycle that fell back to the offline frame.
+/// Short enough that a device recovers on its own once the network or the
+/// upstream plan comes back.
+pub const OFFLINE_RETRY: core::time::Duration = core::time::Duration::from_secs(60);
+
 impl Config {
+    pub fn refresh_interval(&self) -> core::time::Duration {
+        core::time::Duration::from_secs(self.refresh_minutes as u64 * 60)
+    }
+
+    pub fn next_fetch_delay(&self, last_was_live: bool) -> core::time::Duration {
+        if last_was_live {
+            self.refresh_interval()
+        } else {
+            OFFLINE_RETRY
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         if !(self.thresholds.low_c < self.thresholds.mid_c
             && self.thresholds.mid_c < self.thresholds.high_c)
@@ -220,10 +237,21 @@ pub fn migrate(raw: serde_json::Value) -> Result<Config, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::time::Duration;
     use serde_json::json;
 
     fn valid() -> Config {
         Config::example()
+    }
+
+    #[test]
+    fn fetch_delay_backs_off_only_while_offline() {
+        let mut config = valid();
+        config.refresh_minutes = 30;
+        assert_eq!(config.refresh_interval(), Duration::from_secs(1800));
+        assert_eq!(config.next_fetch_delay(true), Duration::from_secs(1800));
+        assert_eq!(config.next_fetch_delay(false), OFFLINE_RETRY);
+        assert!(OFFLINE_RETRY < config.refresh_interval());
     }
 
     #[test]

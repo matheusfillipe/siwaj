@@ -149,7 +149,7 @@ qemu-smoke: qemu-image ## boot the emulator image once and check the boot banner
 qemu-run: qemu-image ## boot a detached emulated device; web ui on http://127.0.0.1:47652
 	$(UV) python -m siwaj.qemu serve $(QEMU_IMAGE)
 
-qemu-display: ## open an SDL window mirroring the emulated e-paper (run qemu-run first)
+qemu-display: ## open an SDL window mirroring the emulated e-paper live (run qemu-run first)
 	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example mirror --features preview
 
 qemu-stop:

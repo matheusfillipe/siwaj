@@ -200,55 +200,36 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         Ok(())
     })?;
 
-    // Renders the exact frame the e-paper would show for a live fetch; lets
-    // the emulator (and a config-mode device) preview the display over HTTP.
-    // Streams header + rows: a whole 120KB BMP would not fit the emulator's
-    // heap.
-    server.fn_handler::<AnyError, _>("/api/frame.bmp", Method::Get, |req| {
-        let config = match store.load() {
-            Ok(Some(config)) => config,
-            Ok(None) => {
-                let mut resp = req.into_status_response(409)?;
-                resp.write_all(b"not configured")?;
-                return Ok(());
-            }
-            Err(e) => {
-                let mut resp = req.into_status_response(500)?;
-                resp.write_all(format!("{e:#}").as_bytes())?;
-                return Ok(());
-            }
-        };
-        let view = match weather::fetch(secrets, config.location.lat, config.location.lon) {
-            Ok(snapshot) => siwaj_core::render::View::from_snapshot(
-                &snapshot,
-                &config,
-                None,
-                crate::now_unix(),
-            ),
-            Err(e) => {
-                let mut resp = req.into_status_response(502)?;
-                resp.write_all(format!("{e:#}").as_bytes())?;
-                return Ok(());
-            }
-        };
-        let fb = siwaj_core::render::render(&view);
-        let mut resp = req.into_response(
-            200,
-            Some("OK"),
-            &[
-                ("Content-Type", "image/bmp"),
-                ("Cache-Control", "no-cache"),
-            ],
-        )?;
-        resp.write_all(&siwaj_core::render::bmp_header())?;
-        let mut row = [0u8; siwaj_core::render::WIDTH as usize * 3];
-        for y in 0..siwaj_core::render::HEIGHT as usize {
-            siwaj_core::render::bmp_row(&fb, y, &mut row);
-            resp.write_all(&row)?;
-        }
-        resp.flush()?;
-        Ok(())
-    })?;
+    #[cfg(esp32)]
+    server.fn_handler::<AnyError, _>("/api/frame", Method::Get, serve_frame)?;
 
     Ok(server)
+}
+
+/// Hands out the packed 1bpp frame as-is: 5000 bytes, one write. Viewers
+/// already know the packing, and an encoded image costs 24x the bytes this
+/// device can spare. `X-Siwaj-Frame` names which face it is, since an offline
+/// frame is a well-formed frame and would otherwise mask a dead fetch.
+#[cfg(esp32)]
+fn serve_frame(
+    req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
+) -> anyhow::Result<()> {
+    let cached = crate::frame::last();
+    let Some(frame) = cached.as_ref() else {
+        let mut resp = req.into_status_response(409)?;
+        resp.write_all(b"nothing rendered yet")?;
+        return Ok(());
+    };
+    let mut resp = req.into_response(
+        200,
+        Some("OK"),
+        &[
+            ("Content-Type", "application/octet-stream"),
+            ("Cache-Control", "no-cache"),
+            ("X-Siwaj-Frame", if frame.live { "live" } else { "offline" }),
+        ],
+    )?;
+    resp.write_all(&frame.bytes)?;
+    resp.flush()?;
+    Ok(())
 }

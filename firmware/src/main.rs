@@ -6,6 +6,8 @@ use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 
 mod board;
+#[cfg(esp32)]
+mod frame;
 mod net;
 mod secrets;
 mod server;
@@ -13,13 +15,13 @@ mod store;
 mod weather;
 
 #[cfg(esp32s3)]
-const WAKE_INTERVAL_SECS: u64 = 30 * 60;
+const WAKE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Budget for one weather cycle: wifi bring-up, sntp, the One Call fetch,
 /// and the e-paper update, with margin. The watchdog forces deep sleep if a
 /// hung step (stalled DHCP or TLS read) would otherwise drain the battery.
 #[cfg(esp32s3)]
-const CYCLE_BUDGET_SECS: u64 = 120;
+const CYCLE_BUDGET: std::time::Duration = std::time::Duration::from_secs(120);
 
 // deep_sleep diverges, so the trailing Ok(()) is unreachable on esp32s3
 #[cfg_attr(esp32s3, allow(unreachable_code))]
@@ -138,18 +140,18 @@ fn main() -> anyhow::Result<()> {
         // every wake must terminate in deep sleep; a failed cycle only costs
         // one stale frame, staying awake would cost the battery
         if let Some(config) = config.as_ref() {
-            arm_cycle_watchdog(config.refresh_minutes as u64 * 60);
+            arm_cycle_watchdog(config.refresh_interval());
             if let Err(e) =
                 run_weather_cycle(hardware, sys_loop, nvs_partition, config, secrets_store)
             {
                 log::error!("weather cycle failed: {e}");
             }
         }
-        let refresh_secs = config
+        let refresh = config
             .as_ref()
-            .map(|c| c.refresh_minutes as u64 * 60)
-            .unwrap_or(WAKE_INTERVAL_SECS);
-        deep_sleep(refresh_secs);
+            .map(siwaj_core::Config::refresh_interval)
+            .unwrap_or(WAKE_INTERVAL);
+        deep_sleep(refresh);
     }
     #[cfg(esp32)]
     {
@@ -183,6 +185,8 @@ fn run_config_mode(
     if let Some(ip) = net::ip_info(&net) {
         log::info!("config mode: serving on http://{}", ip.ip);
     }
+    #[cfg(esp32)]
+    frame::spawn_loop(store, secrets_store);
     let server = server::start(store, secrets_store)?;
     core::mem::forget(net);
     core::mem::forget(server);
@@ -228,24 +232,31 @@ fn run_weather_cycle(
     )?;
     sync_time();
 
-    let view = match weather::fetch(secrets_store, config.location.lat, config.location.lon) {
-        Ok(snapshot) => siwaj_core::render::View::from_snapshot(
-            &snapshot,
-            config,
-            board.battery.pct(),
-            now_unix(),
-        ),
+    let view = weather_view(secrets_store, config, board.battery.pct());
+    board.draw(&view)?;
+    board.power_down();
+    Ok(())
+}
+
+/// One cycle's display state: the live One Call fetch, or the offline face
+/// when it fails. `View::offline` marks which one the caller got.
+pub(crate) fn weather_view(
+    secrets: &secrets::Secrets,
+    config: &siwaj_core::Config,
+    battery_pct: Option<u8>,
+) -> siwaj_core::render::View {
+    match weather::fetch(secrets, config.location.lat, config.location.lon) {
+        Ok(snapshot) => {
+            siwaj_core::render::View::from_snapshot(&snapshot, config, battery_pct, now_unix())
+        }
         Err(e) => {
             log::warn!("weather fetch failed: {e}; drawing offline frame");
             siwaj_core::render::View::offline(
                 siwaj_core::render::TimeOfDay::from_unix(now_unix()),
-                board.battery.pct(),
+                battery_pct,
             )
         }
-    };
-    board.draw(&view)?;
-    board.power_down();
-    Ok(())
+    }
 }
 
 pub(crate) fn now_unix() -> u32 {
@@ -276,22 +287,25 @@ fn sync_time() {
 }
 
 #[cfg(esp32s3)]
-fn arm_cycle_watchdog(refresh_secs: u64) {
+fn arm_cycle_watchdog(refresh: std::time::Duration) {
     std::thread::Builder::new()
         .name("watchdog".to_string())
         .stack_size(2048)
         .spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(CYCLE_BUDGET_SECS));
-            log::error!("weather cycle overran {CYCLE_BUDGET_SECS}s; forcing deep sleep");
-            deep_sleep(refresh_secs);
+            std::thread::sleep(CYCLE_BUDGET);
+            log::error!(
+                "weather cycle overran {}s; forcing deep sleep",
+                CYCLE_BUDGET.as_secs()
+            );
+            deep_sleep(refresh);
         })
         .expect("spawn watchdog");
 }
 
 #[cfg(esp32s3)]
-fn deep_sleep(secs: u64) -> ! {
-    log::info!("deep sleeping for {secs}s");
+fn deep_sleep(duration: std::time::Duration) -> ! {
+    log::info!("deep sleeping for {}s", duration.as_secs());
     // SAFETY: terminal call; the SoC enters deep sleep and never returns, so
     // no state after this point is observable.
-    unsafe { esp_idf_svc::sys::esp_deep_sleep(secs * 1_000_000) }
+    unsafe { esp_idf_svc::sys::esp_deep_sleep(duration.as_micros() as u64) }
 }

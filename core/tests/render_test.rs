@@ -89,7 +89,7 @@ fn snapshots_match_fixtures() {
 fn framebuffer_starts_white() {
     let fb = Framebuffer::new();
     assert!(fb.buffer().iter().all(|&b| b == 0xFF));
-    assert_eq!(fb.buffer().len(), 5000);
+    assert_eq!(fb.buffer().len(), siwaj_core::render::FRAME_BYTES);
 }
 
 #[test]
@@ -142,19 +142,12 @@ fn view_from_snapshot_maps_every_field() {
 }
 
 #[test]
-fn bmp_is_a_well_formed_24bit_image() {
+fn frame_is_a_packed_1bpp_buffer() {
     let fb = render(&view(Garment::Jacket, rain(50, true), -3.4));
-    let img = siwaj_core::render::bmp(&fb);
-    assert_eq!(&img[0..2], b"BM");
-    assert_eq!(img.len(), 54 + 3 * 200 * 200);
-    let file_size = u32::from_le_bytes(img[2..6].try_into().unwrap()) as usize;
-    assert_eq!(file_size, img.len());
-    let width = i32::from_le_bytes(img[18..22].try_into().unwrap());
-    let height = i32::from_le_bytes(img[22..26].try_into().unwrap());
-    assert_eq!((width, height), (200, 200));
-    let bpp = u16::from_le_bytes(img[28..30].try_into().unwrap());
-    assert_eq!(bpp, 24);
-    // pixel data starts white and contains black ink
-    assert_eq!(&img[54..57], &[0xFF, 0xFF, 0xFF]);
-    assert!(img[54..].contains(&0x00));
+    assert_eq!(fb.buffer().len(), siwaj_core::render::FRAME_BYTES);
+    assert!(fb.buffer().contains(&0xFF), "background is unset bits");
+    assert!(
+        fb.buffer().iter().any(|b| *b != 0xFF),
+        "ink is cleared bits"
+    );
 }

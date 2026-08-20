@@ -6,37 +6,44 @@ use embedded_graphics::mono_font::ascii::{FONT_6X12, FONT_10X20};
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::rectangle::Rectangle;
-use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle};
+use embedded_graphics::primitives::{Circle, Line, PrimitiveStyle, Triangle};
 use embedded_graphics::text::Text;
 
 use crate::{Garment, RainOutlook};
 
 pub const WIDTH: u32 = 200;
 pub const HEIGHT: u32 = 200;
-const BUF_LEN: usize = (WIDTH * HEIGHT / 8) as usize;
+pub const FRAME_BYTES: usize = (WIDTH * HEIGHT / 8) as usize;
 
 const ON: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
-const THICK: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 3);
 const FILL: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
 const SLEEVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 9);
 const CARVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::Off);
 const CARVE_S1: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
-const CARVE_S2: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 2);
 const CARVE_S3: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 3);
 
 pub struct Framebuffer {
-    buffer: [u8; BUF_LEN],
+    buffer: [u8; FRAME_BYTES],
 }
 
 impl Framebuffer {
     pub fn new() -> Framebuffer {
         Framebuffer {
-            buffer: [0xFF; BUF_LEN],
+            buffer: [0xFF; FRAME_BYTES],
         }
     }
 
     pub fn buffer(&self) -> &[u8] {
         &self.buffer
+    }
+
+    /// The device packs frames, it never unpacks them, so this stays out of
+    /// firmware builds.
+    #[cfg(any(test, feature = "preview"))]
+    pub fn from_bytes(bytes: &[u8]) -> Option<Framebuffer> {
+        Some(Framebuffer {
+            buffer: bytes.try_into().ok()?,
+        })
     }
 
     pub fn iter_pixels(&self) -> impl Iterator<Item = Pixel<BinaryColor>> + '_ {
@@ -141,8 +148,7 @@ impl View {
     }
 
     /// The frame for a successful One Call fetch; the single mapping from a
-    /// weather snapshot to display state, shared by the device cycle and the
-    /// /api/frame.bmp debug preview.
+    /// weather snapshot to display state.
     pub fn from_snapshot(
         snapshot: &crate::weather::Snapshot,
         config: &crate::Config,
@@ -179,81 +185,82 @@ fn px(b: &Bounds, fx: f32, fy: f32) -> Point {
 
 // Garments are filled silhouettes; necklines, ribs and seams are carved back
 // out with white (background) primitives, which reads far better at 200x200
-// than stroked outlines.
+// than stroked outlines. Shape carries the meaning at this size: surface
+// detail below about 3px dissolves into noise on the panel, so the four
+// garments differ by outline and opening, never by ornament.
+
+/// The heavy one: widest body, split open down the front, with lapels folded
+/// back over the chest and banded cuffs. The open front is what separates it
+/// from the shirt at a glance.
 fn draw_jacket<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    Circle::new(px(b, 0.5, 0.18), 15)
-        .into_styled(THICK)
-        .draw(d)?;
-    Rectangle::with_corners(px(b, 0.32, 0.10), px(b, 0.68, 0.96))
+    Rectangle::with_corners(px(b, 0.29, 0.10), px(b, 0.71, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.34, 0.14), px(b, 0.08, 0.66))
+    Line::new(px(b, 0.31, 0.13), px(b, 0.05, 0.62))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.66, 0.14), px(b, 0.92, 0.66))
+    Line::new(px(b, 0.69, 0.13), px(b, 0.95, 0.62))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.40, 0.10), px(b, 0.5, 0.30))
+    // the opening: a wedge at the collar continuing as a gap to the hem
+    Triangle::new(px(b, 0.38, 0.08), px(b, 0.62, 0.08), px(b, 0.5, 0.46))
+        .into_styled(CARVE)
+        .draw(d)?;
+    Line::new(px(b, 0.5, 0.44), px(b, 0.5, 0.96))
         .into_styled(CARVE_S3)
         .draw(d)?;
-    Line::new(px(b, 0.60, 0.10), px(b, 0.5, 0.30))
-        .into_styled(CARVE_S3)
+    // lapels folded back across the opening
+    Triangle::new(px(b, 0.34, 0.10), px(b, 0.47, 0.10), px(b, 0.41, 0.38))
+        .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.5, 0.30), px(b, 0.5, 0.96))
-        .into_styled(CARVE_S2)
-        .draw(d)?;
-    Line::new(px(b, 0.36, 0.72), px(b, 0.46, 0.72))
-        .into_styled(CARVE_S1)
-        .draw(d)?;
-    Line::new(px(b, 0.54, 0.72), px(b, 0.64, 0.72))
-        .into_styled(CARVE_S1)
+    Triangle::new(px(b, 0.66, 0.10), px(b, 0.53, 0.10), px(b, 0.59, 0.38))
+        .into_styled(FILL)
         .draw(d)?;
     Ok(())
 }
 
+/// Crew neck and ribbed hem and cuffs: closed like the shirt, but banded, and
+/// cut wider so it reads as the warmer of the two.
 fn draw_pullover<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     b: &Bounds,
 ) -> Result<(), D::Error> {
-    Rectangle::with_corners(px(b, 0.34, 0.08), px(b, 0.66, 0.96))
+    Rectangle::with_corners(px(b, 0.33, 0.12), px(b, 0.67, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.36, 0.12), px(b, 0.12, 0.68))
+    Line::new(px(b, 0.35, 0.16), px(b, 0.11, 0.64))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.64, 0.12), px(b, 0.88, 0.68))
+    Line::new(px(b, 0.65, 0.16), px(b, 0.89, 0.64))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Rectangle::with_corners(px(b, 0.41, 0.04), px(b, 0.59, 0.12))
+    Circle::new(px(b, 0.43, 0.02), 15)
         .into_styled(CARVE)
         .draw(d)?;
-    Line::new(px(b, 0.36, 0.86), px(b, 0.64, 0.86))
+    Line::new(px(b, 0.35, 0.86), px(b, 0.65, 0.86))
         .into_styled(CARVE_S1)
         .draw(d)?;
-    Line::new(px(b, 0.36, 0.91), px(b, 0.64, 0.91))
+    Line::new(px(b, 0.35, 0.91), px(b, 0.65, 0.91))
         .into_styled(CARVE_S1)
         .draw(d)?;
     Ok(())
 }
 
+/// Closed body and the narrowest cut, with an open collar notched into the
+/// shoulders. Closed against the jacket's split front, V-necked against the
+/// pullover's round one.
 fn draw_shirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    Rectangle::with_corners(px(b, 0.36, 0.10), px(b, 0.64, 0.96))
+    Rectangle::with_corners(px(b, 0.37, 0.14), px(b, 0.63, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.38, 0.14), px(b, 0.15, 0.62))
+    Line::new(px(b, 0.39, 0.18), px(b, 0.17, 0.60))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.62, 0.14), px(b, 0.85, 0.62))
+    Line::new(px(b, 0.61, 0.18), px(b, 0.83, 0.60))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.41, 0.10), px(b, 0.5, 0.26))
-        .into_styled(CARVE_S3)
-        .draw(d)?;
-    Line::new(px(b, 0.59, 0.10), px(b, 0.5, 0.26))
-        .into_styled(CARVE_S3)
-        .draw(d)?;
-    Line::new(px(b, 0.5, 0.26), px(b, 0.5, 0.96))
-        .into_styled(CARVE_S1)
+    Triangle::new(px(b, 0.43, 0.12), px(b, 0.57, 0.12), px(b, 0.5, 0.28))
+        .into_styled(CARVE)
         .draw(d)?;
     Ok(())
 }
@@ -454,80 +461,6 @@ pub fn render(view: &View) -> Framebuffer {
     fb
 }
 
-/// Fixed 54-byte header for the 24-bit bottom-up BMP this module emits.
-pub fn bmp_header() -> [u8; 54] {
-    let row = WIDTH as usize * 3;
-    let data_len = row * HEIGHT as usize;
-    let mut out = [0u8; 54];
-    out[0..2].copy_from_slice(b"BM");
-    out[2..6].copy_from_slice(&((54 + data_len) as u32).to_le_bytes());
-    out[10..14].copy_from_slice(&54u32.to_le_bytes());
-    out[14..18].copy_from_slice(&40u32.to_le_bytes());
-    out[18..22].copy_from_slice(&(WIDTH as i32).to_le_bytes());
-    out[22..26].copy_from_slice(&(HEIGHT as i32).to_le_bytes());
-    out[26..28].copy_from_slice(&1u16.to_le_bytes());
-    out[28..30].copy_from_slice(&24u16.to_le_bytes());
-    out[34..38].copy_from_slice(&(data_len as u32).to_le_bytes());
-    out[38..42].copy_from_slice(&2835i32.to_le_bytes());
-    out[42..46].copy_from_slice(&2835i32.to_le_bytes());
-    out
-}
-
-/// Writes BMP pixel row `y_from_bottom` (0 = last image row) into `out`,
-/// which must be exactly WIDTH*3 bytes; lets emitters stream instead of
-/// holding the full image in RAM.
-pub fn bmp_row(fb: &Framebuffer, y_from_bottom: usize, out: &mut [u8]) {
-    let y = HEIGHT as usize - 1 - y_from_bottom;
-    let row = out.chunks_exact_mut(3);
-    for (x, px) in row.enumerate() {
-        let (index, bit) = bit_position(x as u32, y as u32);
-        let on = (fb.buffer[index] >> bit) & 1 == 0;
-        let v = if on { 0x00 } else { 0xFF };
-        px.copy_from_slice(&[v, v, v]);
-    }
-}
-
-/// Encodes a frame as a 24-bit bottom-up BMP, the one image format every
-/// browser renders and a device can emit without a compressor.
-pub fn bmp(fb: &Framebuffer) -> Vec<u8> {
-    let mut out = Vec::with_capacity(54 + WIDTH as usize * 3 * HEIGHT as usize);
-    out.extend_from_slice(&bmp_header());
-    let mut row = vec![0u8; WIDTH as usize * 3];
-    for y in 0..HEIGHT as usize {
-        bmp_row(fb, y, &mut row);
-        out.extend_from_slice(&row);
-    }
-    out
-}
-
-/// Decodes the 24-bit BMP emitted by `bmp` back into a frame; host-side only
-/// (live display mirror and tests). The device encodes, never decodes, so
-/// this is compiled out of firmware builds.
-#[cfg(any(test, feature = "preview"))]
-pub fn decode_bmp(body: &[u8]) -> Option<Framebuffer> {
-    if body.len() < 54 || &body[0..2] != b"BM" {
-        return None;
-    }
-    let width = u32::from_le_bytes(body[18..22].try_into().ok()?) as usize;
-    let height = u32::from_le_bytes(body[22..26].try_into().ok()?) as usize;
-    if width != WIDTH as usize || height != HEIGHT as usize {
-        return None;
-    }
-    let data = body.get(54..)?;
-    let mut fb = Framebuffer::new();
-    for row in 0..height {
-        let y = height - 1 - row;
-        for x in 0..width {
-            let px = data.get(row * width * 3 + x * 3..row * width * 3 + x * 3 + 3)?;
-            if px == [0x00, 0x00, 0x00] {
-                let (index, bit) = bit_position(x as u32, y as u32);
-                fb.buffer[index] &= !(1 << bit);
-            }
-        }
-    }
-    Some(fb)
-}
-
 pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     draw_garment(d, view.garment).ok();
     if view.offline {
@@ -562,20 +495,16 @@ mod tests {
     }
 
     #[test]
-    fn bmp_decode_round_trips() {
+    fn frame_bytes_round_trip() {
         let fb = sample();
-        let back = decode_bmp(&bmp(&fb)).unwrap();
+        let back = Framebuffer::from_bytes(fb.buffer()).unwrap();
         assert_eq!(back.buffer(), fb.buffer());
     }
 
     #[test]
-    fn bmp_decode_rejects_wrong_shapes() {
-        assert!(decode_bmp(b"").is_none());
-        assert!(decode_bmp(b"BM").is_none());
-        let mut tiny = vec![0u8; 54];
-        tiny[0..2].copy_from_slice(b"BM");
-        tiny[18..22].copy_from_slice(&100u32.to_le_bytes());
-        tiny[22..26].copy_from_slice(&100u32.to_le_bytes());
-        assert!(decode_bmp(&tiny).is_none());
+    fn from_bytes_rejects_wrong_lengths() {
+        assert!(Framebuffer::from_bytes(b"").is_none());
+        assert!(Framebuffer::from_bytes(&vec![0u8; FRAME_BYTES - 1]).is_none());
+        assert!(Framebuffer::from_bytes(&vec![0u8; FRAME_BYTES + 1]).is_none());
     }
 }

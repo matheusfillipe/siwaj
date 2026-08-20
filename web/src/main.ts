@@ -18,9 +18,6 @@ interface Elements {
   midOut: HTMLOutputElement;
   highOut: HTMLOutputElement;
   rainOut: HTMLOutputElement;
-  preview: HTMLElement;
-  frame: HTMLImageElement;
-  previewNote: HTMLElement;
 }
 
 function elements(): Elements {
@@ -39,22 +36,7 @@ function elements(): Elements {
     midOut: document.getElementById("midOut") as HTMLOutputElement,
     highOut: document.getElementById("highOut") as HTMLOutputElement,
     rainOut: document.getElementById("rainOut") as HTMLOutputElement,
-    preview: document.getElementById("preview") as HTMLElement,
-    frame: document.getElementById("frame") as HTMLImageElement,
-    previewNote: document.getElementById("previewNote") as HTMLElement,
   };
-}
-
-async function refreshFrame(el: Elements): Promise<void> {
-  el.previewNote.textContent = "fetching...";
-  try {
-    const res = await fetch(`/api/frame.bmp?t=${Date.now()}`);
-    if (!res.ok) throw new Error((await res.text()) || `frame fetch failed: ${res.status}`);
-    el.frame.src = URL.createObjectURL(await res.blob());
-    el.previewNote.textContent = "";
-  } catch (err) {
-    el.previewNote.textContent = err instanceof Error ? err.message : "frame unavailable";
-  }
 }
 
 function setStatus(el: Elements, message: string, isError = false): void {
@@ -99,9 +81,6 @@ async function sync(el: Elements): Promise<void> {
   if (server.config !== null && server.config.revision > 0) {
     saveClientState({ revision: server.config.revision, config: server.config });
     fillForm(el, server.config);
-    el.preview.classList.remove("hidden");
-    void refreshFrame(el);
-    window.setInterval(() => void refreshFrame(el), 60_000);
     return;
   }
 
@@ -143,7 +122,6 @@ function main(): void {
     input.addEventListener("input", () => updateOutputs(el));
   }
   el.form.addEventListener("submit", (event) => void onSave(el, event));
-  el.preview.addEventListener("click", () => void refreshFrame(el));
   sync(el).catch((err: unknown) => {
     setStatus(el, err instanceof Error ? err.message : "device unreachable", true);
   });

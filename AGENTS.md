@@ -3,7 +3,7 @@
 Instructions for AI agents working in this repo. Read before editing.
 
 ## What this is
-Firmware and web config app for the siwaj ("should i wear a jacket") e-paper device: an ESP32-S3-ePaper-1.54 (V2) board that deep sleeps, fetches OpenWeather One Call 3.0, and shows shirt/pullover/jacket plus rain risk on a 200x200 e-paper display.
+Firmware and web config app for the siwaj ("should i wear a jacket") e-paper device: an ESP32-S3-ePaper-1.54 (V2) board that deep sleeps, fetches OpenWeather One Call 4.0, and shows shirt/pullover/jacket plus rain risk on a 200x200 e-paper display.
 
 ## Where things live
 - Shared contract (config types, thresholds, decision logic, TS binding export): `core/`
@@ -69,7 +69,10 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.
 - esp32 build = QEMU-only variant (config-mode + OpenETH); esp32s3 build = the real device. Target-specific code is `#[cfg]`-gated; keep both warning-free (`make build`).
-- `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug. `GET /api/frame.bmp` renders that fetch into the exact e-paper frame as a BMP: live display preview for the emulator and config mode.
+- One Call 4.0 serves each resolution from its own endpoint, so a weather cycle spends two requests: `timeline/1h` for feels-like, next-hour pop and the zone offset, `timeline/1min` for the precipitation trace. `core::weather::parse_hourly` then `merge_minutely` fold both into one `Snapshot`; `timeline/1h`'s `data[0]` is the current hour bucket, so feels-like is that hour's value. Budget two calls per wake against the account's daily cap.
+- `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug.
+- The emulator has no panel, so the esp32 build runs a frame loop instead: the same fetch and view the s3 cycle draws, published into memory. `GET /api/frame` hands out those 5000 bytes (packed 1bpp, `render::FRAME_BYTES`) with `X-Siwaj-Frame: live|offline`, and `make qemu-display` draws them. Both are `#[cfg(esp32)]`, so the frame loop, the endpoint, and the cached frame exist only in the emulator build.
+- A cycle whose fetch fails still renders, as the offline face; `Config::next_fetch_delay` then retries on `OFFLINE_RETRY` instead of the full refresh interval, so a device recovers once upstream does. The face travels with the frame because an offline frame is a well-formed frame and would otherwise pass every shape check.
 - NVS keys are capped at 15 chars: `Secrets` maps `.env` names to short keys (`ow_key`, `wifi_ssid`, `wifi_pass`).
 - QEMU writes device state into `firmware/target-esp32/qemu-dev/device.bin`; delete it to reset the emulated device (the e2e does this every run).
 - Prose (docs, commits): declarative, terse, no em dashes.

@@ -7,6 +7,7 @@ Exit 0 only if every assertion holds.
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -17,6 +18,7 @@ REPO_ROOT = qemu.REPO_ROOT
 IMAGE = REPO_ROOT / "firmware" / "target-esp32" / "siwaj-smoke.bin"
 HTTP_PORT = qemu.HTTP_PORT
 BASE = f"http://127.0.0.1:{HTTP_PORT}"
+FRAME_BYTES = 200 * 200 // 8
 
 
 def http_json(method: str, path: str, payload: dict | None = None) -> tuple[int, dict | str]:
@@ -32,14 +34,27 @@ def http_json(method: str, path: str, payload: dict | None = None) -> tuple[int,
         return err.code, err.read().decode(errors="replace")
 
 
-def http_bytes(path: str, timeout: float = 60.0) -> tuple[int, bytes]:
+def http_bytes(path: str, timeout: float = 60.0) -> tuple[int, bytes, str]:
     try:
         with urllib.request.urlopen(BASE + path, timeout=timeout) as resp:
-            return resp.status, resp.read()
+            return resp.status, resp.read(), resp.headers.get("X-Siwaj-Frame", "")
     except urllib.error.HTTPError as err:
-        return err.code, err.read()
+        return err.code, err.read(), ""
     except (urllib.error.URLError, OSError) as err:
-        return 0, str(err).encode()
+        return 0, str(err).encode(), ""
+
+
+def await_frame(timeout: float = 120.0) -> tuple[int, bytes, str]:
+    """The device renders on its own schedule, so the first frame lands some
+    seconds after the config is saved."""
+    deadline = time.monotonic() + timeout
+    status, body, face = 0, b"", ""
+    while time.monotonic() < deadline:
+        status, body, face = http_bytes("/api/frame")
+        if status == 200:
+            break
+        time.sleep(2)
+    return status, body, face
 
 
 def check(name: str, ok: bool, detail: str = "") -> bool:
@@ -125,15 +140,28 @@ def main() -> int:
             else:
                 results.append(check("GET /api/weather -> 200", False, str(weather)[:80]))
 
-            print("e2e: display frame render")
-            status, frame = http_bytes("/api/frame.bmp")
-            if status == 200:
-                ok = frame[:2] == b"BM" and len(frame) == 54 + 3 * 200 * 200
-                results.append(check("GET /api/frame.bmp -> BMP", ok, f"{len(frame)} bytes"))
-            elif status == 502 and b"returned 40" in frame:
-                results.append(check("frame endpoint answers (plan not activated)", True))
-            else:
-                results.append(check("GET /api/frame.bmp -> BMP", False, str(frame)[:80]))
+        print("e2e: rendered frame")
+        status, frame, face = await_frame()
+        results.append(
+            check(
+                "GET /api/frame -> packed frame",
+                status == 200 and len(frame) == FRAME_BYTES,
+                f"status {status}, {len(frame)} bytes, {face or 'no'} face",
+            )
+        )
+        # an offline frame is a well-formed frame, so the face has to be
+        # asserted separately or a device with a dead weather fetch passes
+        if not has_key:
+            print("  SKIP  frame face (no .env key)")
+        elif face == "live":
+            results.append(check("frame carries live weather", True))
+        else:
+            # same upstream auth story as the weather probe above
+            results.append(
+                check(
+                    "frame reports the offline face (plan not activated)", face == "offline", face
+                )
+            )
 
         print("e2e: invalid input rejected")
         status, _ = http_json(
