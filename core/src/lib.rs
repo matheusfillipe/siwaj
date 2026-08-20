@@ -80,6 +80,15 @@ pub struct WeatherProbe {
     pub timezone_offset_secs: i32,
 }
 
+/// Inputs the emulator has no hardware for. Only the QEMU build accepts
+/// these; the device reads the real sense lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SimInputs {
+    pub charging: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum Garment {

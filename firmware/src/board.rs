@@ -119,15 +119,30 @@ mod device {
             Ok(Battery { channel })
         }
 
-        pub fn pct(&mut self) -> Option<u8> {
-            let mv = match self.channel.read() {
-                Ok(mv) => mv,
+        /// Rail voltage a discharging cell cannot reach, so anything at or
+        /// above it means the charger is driving the rail. Tune against the
+        /// board: too low and a fresh cell reads as plugged in forever.
+        const EXTERNAL_POWER: f32 = 4.2;
+
+        pub fn volts(&mut self) -> Option<f32> {
+            match self.channel.read() {
+                Ok(mv) => Some(mv as f32 * 2.0 / 1000.0),
                 Err(e) => {
                     log::warn!("battery adc read failed: {e}");
-                    return None;
+                    None
                 }
-            };
-            let volts = mv as f32 * 2.0 / 1000.0;
+            }
+        }
+
+        /// True only while the rail sits above what the cell alone can supply.
+        /// A charge that has not yet pushed the rail that high is
+        /// indistinguishable from running on battery at this sense point.
+        pub fn charging(&mut self) -> bool {
+            self.volts().is_some_and(|v| v >= Self::EXTERNAL_POWER)
+        }
+
+        pub fn pct(&mut self) -> Option<u8> {
+            let volts = self.volts()?;
             const FULL: f32 = 4.12;
             const EMPTY: f32 = 3.0;
             if volts <= EMPTY {

@@ -126,13 +126,14 @@ pub struct View {
     /// None when the ADC read failed; drawn as an empty battery with a "--%"
     /// label rather than a fabricated charge level.
     pub battery_pct: Option<u8>,
+    pub charging: bool,
     pub offline: bool,
 }
 
 impl View {
     /// The frame for a failed weather cycle: the safe garment, the clock, and
     /// the real battery, with no invented weather numbers.
-    pub fn offline(updated: TimeOfDay, battery_pct: Option<u8>) -> View {
+    pub fn offline(updated: TimeOfDay, battery_pct: Option<u8>, charging: bool) -> View {
         View {
             garment: Garment::Jacket,
             feels_like_c: 0.0,
@@ -143,6 +144,7 @@ impl View {
             rain_threshold_pct: 0,
             updated,
             battery_pct,
+            charging,
             offline: true,
         }
     }
@@ -153,6 +155,7 @@ impl View {
         snapshot: &crate::weather::Snapshot,
         config: &crate::Config,
         battery_pct: Option<u8>,
+        charging: bool,
         now_unix: u32,
     ) -> View {
         View {
@@ -164,6 +167,7 @@ impl View {
                 now_unix.wrapping_add(snapshot.timezone_offset_secs as u32),
             ),
             battery_pct,
+            charging,
             offline: false,
         }
     }
@@ -399,7 +403,7 @@ fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
     Rectangle::with_corners(Point::new(bx + 1, by + 6), Point::new(bx + 21, by + 13))
         .into_styled(FILL)
         .draw(d)?;
-    if view.rain.rain_expected || view.rain.is_risk(view.rain_threshold_pct) {
+    if view.rain.is_risk(view.rain_threshold_pct) {
         for i in 0..3 {
             let x = bx + 3 + i * 7;
             Line::new(Point::new(x, by + 18), Point::new(x - 3, by + 24))
@@ -420,8 +424,28 @@ fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
 fn draw_battery<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     pct: Option<u8>,
+    charging: bool,
 ) -> Result<(), D::Error> {
     let (bx, by) = (160, 162);
+    if charging {
+        // bolt to the left of the cell, outside it, so it stays readable at
+        // any charge level instead of vanishing into the fill
+        let (lx, ly) = (bx - 14, by);
+        Triangle::new(
+            Point::new(lx + 6, ly),
+            Point::new(lx + 9, ly),
+            Point::new(lx, ly + 8),
+        )
+        .into_styled(FILL)
+        .draw(d)?;
+        Triangle::new(
+            Point::new(lx + 3, ly + 5),
+            Point::new(lx + 9, ly + 4),
+            Point::new(lx + 2, ly + 13),
+        )
+        .into_styled(FILL)
+        .draw(d)?;
+    }
     Rectangle::with_corners(Point::new(bx, by), Point::new(bx + 27, by + 12))
         .into_styled(ON)
         .draw(d)?;
@@ -474,7 +498,7 @@ pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
         centered_small(d, WIDTH as i32 / 2, 150, "feels like").ok();
         draw_rain_badge(d, view).ok();
     }
-    draw_battery(d, view.battery_pct).ok();
+    draw_battery(d, view.battery_pct, view.charging).ok();
     draw_updated(d, view.updated).ok();
 }
 
@@ -489,6 +513,7 @@ mod tests {
                 minute: 32,
             },
             Some(87),
+            false,
         );
         view.garment = crate::Garment::Pullover;
         render(&view)

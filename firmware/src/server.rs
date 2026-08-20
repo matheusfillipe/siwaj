@@ -95,7 +95,9 @@ fn reboot_soon() {
 pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttpServer<'static>, anyhow::Error> {
     let mut server = EspHttpServer::new(&Configuration {
         stack_size: 12288,
-        max_uri_handlers: 8,
+        // registration fails past this count and takes the whole boot with
+        // it; keep headroom over the handlers actually registered below
+        max_uri_handlers: 16,
         ..Default::default()
     })?;
 
@@ -202,6 +204,41 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
 
     #[cfg(esp32)]
     server.fn_handler::<AnyError, _>("/api/frame", Method::Get, serve_frame)?;
+
+    // Bench controls for what QEMU cannot emulate. Emulator-only: the device
+    // must never take a sense reading from the network.
+    #[cfg(esp32)]
+    server.fn_handler::<AnyError, _>("/api/sim", Method::Post, |mut req| {
+        let len = req.content_len().unwrap_or(0) as usize;
+        if len == 0 || len > 256 {
+            let mut resp = req.into_status_response(400)?;
+            resp.write_all(b"bad request")?;
+            return Ok(());
+        }
+        let mut buf = vec![0u8; len];
+        req.read_exact(&mut buf)?;
+        let inputs: siwaj_core::SimInputs = match serde_json::from_slice(&buf) {
+            Ok(inputs) => inputs,
+            Err(_) => {
+                let mut resp = req.into_status_response(400)?;
+                resp.write_all(b"invalid payload")?;
+                return Ok(());
+            }
+        };
+        crate::frame::set_charging(inputs.charging);
+        log::info!("sim: charging={}", inputs.charging);
+        serve_json(req, &inputs)
+    })?;
+
+    #[cfg(esp32)]
+    server.fn_handler::<AnyError, _>("/api/sim", Method::Get, |req| {
+        serve_json(
+            req,
+            &siwaj_core::SimInputs {
+                charging: crate::frame::charging(),
+            },
+        )
+    })?;
 
     Ok(server)
 }

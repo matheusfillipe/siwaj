@@ -8,7 +8,8 @@ UV := uv run --project tools
         web-typecheck web-bundle web-watch \
         tools-format tools-format-check tools-lint tools-test \
         firmware-partitions build build-qemu firmware-image firmware-flash firmware-monitor \
-        qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-reset qemu-provision provision test-e2e \
+        qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-reset \
+        qemu-charge qemu-unplug qemu-provision provision test-e2e \
         ci-host-checks ci-emulator-tests ci-local ci-local-plan \
         all clean
 
@@ -157,6 +158,12 @@ qemu-stop:
 
 qemu-reset: qemu-stop ## wipe the emulated device's stored config and secrets (next qemu-run is a first setup)
 	rm -f firmware/target-esp32/qemu-dev/device.bin
+
+qemu-charge: ## tell the emulated device the charger is plugged in
+	$(UV) python -m siwaj.qemu sim --charging on
+
+qemu-unplug: ## tell the emulated device it is back on battery
+	$(UV) python -m siwaj.qemu sim --charging off
 
 qemu-provision: ## push .env secrets into the emulated device over its serial REPL
 	$(UV) python -m siwaj.provision --port socket://127.0.0.1:47653

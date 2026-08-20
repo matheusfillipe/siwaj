@@ -21,6 +21,7 @@ fn view(garment: Garment, pop: u8, expected: bool, feels: f32) -> View {
             minute: 32,
         },
         battery_pct: Some(87),
+        charging: false,
         offline: false,
     }
 }
@@ -45,7 +46,7 @@ fn cases() -> Vec<(&'static str, View)> {
         ),
         (
             "5: offline, safe jacket",
-            View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41)),
+            View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41), true),
         ),
     ]
 }

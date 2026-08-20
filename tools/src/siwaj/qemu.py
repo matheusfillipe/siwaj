@@ -235,6 +235,28 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
     return 1
 
 
+def sim(charging: bool) -> int:
+    """Drive the emulator's stand-in sense lines over its bench endpoint."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps({"charging": charging}).encode()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{HTTP_PORT}/api/sim",
+        data=body,
+        method="POST",
+        headers={"content-type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as resp:
+            print(f"sim: charging={charging} (device answered {resp.status})")
+            return 0
+    except (urllib.error.URLError, OSError) as err:
+        print(f"sim failed: {err}; is `make qemu-run` up?", file=sys.stderr)
+        return 1
+
+
 def stop(pid_file: Path) -> int:
     if not pid_file.is_file():
         return 0
@@ -264,8 +286,13 @@ def load_env_secrets() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["smoke", "serve", "stop"])
+    parser.add_argument("command", choices=["smoke", "serve", "stop", "sim"])
     parser.add_argument("image", type=Path, nargs="?", help="merged flash image")
+    parser.add_argument(
+        "--charging",
+        choices=["on", "off"],
+        help="sim: pretend the charger is plugged in, or not",
+    )
     parser.add_argument("--machine", default=MACHINE_DEFAULT, help="QEMU machine type")
     parser.add_argument("--expect", default=EXPECT_LINE, help="serial line marking a good boot")
     parser.add_argument("--timeout", type=float, default=BOOT_TIMEOUT_SECONDS)
@@ -273,6 +300,10 @@ def main() -> int:
 
     if args.command == "stop":
         return stop(RUN_DIR / "qemu.pid")
+    if args.command == "sim":
+        if args.charging is None:
+            parser.error("sim needs --charging on|off")
+        return sim(args.charging == "on")
     if args.image is None:
         parser.error("smoke/serve need a flash image path")
     if args.command == "smoke":

@@ -57,6 +57,19 @@ def await_frame(timeout: float = 120.0) -> tuple[int, bytes, str]:
     return status, body, face
 
 
+def await_change(path: str, previous: bytes, timeout: float = 30.0) -> tuple[int, bytes, str]:
+    """The device redraws on its own loop, so a simulated input lands a tick
+    or two after the request that set it."""
+    deadline = time.monotonic() + timeout
+    status, body, face = 0, previous, ""
+    while time.monotonic() < deadline:
+        status, body, face = http_bytes(path)
+        if body != previous:
+            break
+        time.sleep(1)
+    return status, body, face
+
+
 def check(name: str, ok: bool, detail: str = "") -> bool:
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f" ({detail})" if detail else ""))
     return ok
@@ -162,6 +175,17 @@ def main() -> int:
                     "frame reports the offline face (plan not activated)", face == "offline", face
                 )
             )
+
+        print("e2e: charging indicator")
+        status, charged = http_json("POST", "/api/sim", {"charging": True})
+        results.append(
+            check("POST /api/sim -> 200", status == 200 and charged == {"charging": True})
+        )
+        _, plugged, _ = await_change("/api/frame", frame)
+        results.append(check("charging redraws the frame", plugged != frame))
+        http_json("POST", "/api/sim", {"charging": False})
+        _, unplugged, _ = await_change("/api/frame", plugged)
+        results.append(check("unplugging redraws it back", unplugged == frame))
 
         print("e2e: invalid input rejected")
         status, _ = http_json(

@@ -232,7 +232,12 @@ fn run_weather_cycle(
     )?;
     sync_time();
 
-    let view = weather_view(secrets_store, config, board.battery.pct());
+    let view = weather_view(
+        secrets_store,
+        config,
+        board.battery.pct(),
+        board.battery.charging(),
+    );
     board.draw(&view)?;
     board.power_down();
     Ok(())
@@ -244,16 +249,22 @@ pub(crate) fn weather_view(
     secrets: &secrets::Secrets,
     config: &siwaj_core::Config,
     battery_pct: Option<u8>,
+    charging: bool,
 ) -> siwaj_core::render::View {
     match weather::fetch(secrets, config.location.lat, config.location.lon) {
-        Ok(snapshot) => {
-            siwaj_core::render::View::from_snapshot(&snapshot, config, battery_pct, now_unix())
-        }
+        Ok(snapshot) => siwaj_core::render::View::from_snapshot(
+            &snapshot,
+            config,
+            battery_pct,
+            charging,
+            now_unix(),
+        ),
         Err(e) => {
             log::warn!("weather fetch failed: {e}; drawing offline frame");
             siwaj_core::render::View::offline(
                 siwaj_core::render::TimeOfDay::from_unix(now_unix()),
                 battery_pct,
+                charging,
             )
         }
     }

@@ -18,6 +18,7 @@ fn view(garment: Garment, rain: RainOutlook, feels_like: f32) -> View {
             minute: 32,
         },
         battery_pct: Some(87),
+        charging: false,
         offline: false,
     }
 }
@@ -57,7 +58,7 @@ fn cases() -> Vec<(&'static str, View)> {
         ("battery_unknown", battery_unknown),
         (
             "offline",
-            View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41)),
+            View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41), false),
         ),
     ]
 }
@@ -130,7 +131,7 @@ fn view_from_snapshot_maps_every_field() {
         next_hour_pop_frac: 0.25,
         timezone_offset_secs: 3600,
     };
-    let v = View::from_snapshot(&snapshot, &config, Some(87), 7_200);
+    let v = View::from_snapshot(&snapshot, &config, Some(87), false, 7_200);
     assert_eq!(v.garment, Garment::Shirt);
     assert_eq!(v.feels_like_c, 17.5);
     assert_eq!(v.rain.pop_pct_next_hour, 25);

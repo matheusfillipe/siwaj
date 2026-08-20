@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -14,8 +15,23 @@ pub struct Frame {
 }
 
 static LAST: Mutex<Option<Frame>> = Mutex::new(None);
+/// Stands in for the charger sense the emulator has no hardware for, so the
+/// charging frame can be exercised without a bench supply.
+static CHARGING: AtomicBool = AtomicBool::new(false);
+/// Set when a simulated input changes, so the display follows the switch
+/// instead of waiting out the refresh interval.
+static RESTALE: AtomicBool = AtomicBool::new(false);
 
 const POLL: Duration = Duration::from_secs(1);
+
+pub fn set_charging(on: bool) {
+    CHARGING.store(on, Ordering::Relaxed);
+    RESTALE.store(true, Ordering::Relaxed);
+}
+
+pub fn charging() -> bool {
+    CHARGING.load(Ordering::Relaxed)
+}
 
 /// Borrowed rather than copied out: the frame is 5000 bytes and the httpd
 /// task it gets written from has a 12KB stack.
@@ -34,15 +50,31 @@ pub fn spawn_loop(store: &'static Store, secrets: &'static Secrets) {
         .spawn(move || {
             let booted = Instant::now();
             let mut rendered: Option<(u32, Instant, bool)> = None;
+            let mut showing: Option<siwaj_core::render::View> = None;
             loop {
                 match store.load() {
                     Ok(Some(config)) => {
+                        let switched = RESTALE.swap(false, Ordering::Relaxed);
                         if due(rendered, &config) {
-                            let view =
-                                crate::weather_view(secrets, &config, simulated_battery(booted));
+                            let view = crate::weather_view(
+                                secrets,
+                                &config,
+                                simulated_battery(booted),
+                                charging(),
+                            );
                             let live = !view.offline;
                             publish(&siwaj_core::render::render(&view), live);
                             rendered = Some((config.revision, Instant::now(), live));
+                            showing = Some(view);
+                        } else if switched {
+                            // a flipped switch changes only what the frame
+                            // draws, so redraw the weather already in hand
+                            // rather than spending a fetch on it
+                            if let Some(view) = showing.as_mut() {
+                                view.battery_pct = simulated_battery(booted);
+                                view.charging = charging();
+                                publish(&siwaj_core::render::render(view), !view.offline);
+                            }
                         }
                     }
                     Ok(None) => {}
