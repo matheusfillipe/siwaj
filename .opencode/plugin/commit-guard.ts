@@ -16,7 +16,7 @@ export default (async ({ directory }) => {
       if (!/\bgit\s+commit\b/.test(command)) return
       if (!existsSync(marker)) {
         throw new Error(
-          "siwaj: commit blocked. Run /rev first; it runs `make quality` and creates the .rev-ok marker on pass."
+          "siwaj: commit blocked. Run /rev first; it runs `make check` and `make check-firmware` and creates the .rev-ok marker on pass."
         )
       }
       rmSync(marker, { force: true })

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  host:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
       - run: make install
-      - run: make quality
+      - run: make ci-host
 
   emulator:
     runs-on: ubuntu-latest
@@ -56,6 +56,4 @@ jobs:
             firmware/target-esp32
           key: esp32-${{ runner.os }}-${{ hashFiles('firmware/Cargo.lock') }}
       - run: make install
-      - run: make firmware-lint
-      - run: make qemu-smoke
-      - run: make test-e2e
+      - run: make ci-emulator

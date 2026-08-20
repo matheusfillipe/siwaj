@@ -22,23 +22,24 @@ Firmware and web config app for the siwaj ("should i wear a jacket") e-paper dev
 All web/tooling commands go through the `Makefile`; do not call pnpm/npm/uv/cargo directly.
 
 ## Commands (Makefile is SSoT)
+`make help` lists every target. The ones that matter:
+
 - `make install` pnpm + uv sync plus pre-commit hooks
-- `make quality` the full host gate: cargo fmt/clippy/test, web typecheck + bundle, tools ruff + pytest
-- `make firmware-lint` clippy `-D warnings` on both firmware targets (esp32s3 + QEMU esp32)
-- `make build` everything that must compile: quality + firmware build + firmware lint + QEMU image
-- `make fw-build` fast firmware-only inner loop (build + lint + image)
-- `make fix` autofix pass (cargo fmt/clippy --fix, ruff format)
+- `make check` all host checks (cargo fmt/clippy/test, web typecheck + bundle, tools ruff + pytest); the pre-commit gate
+- `make check-firmware` clippy `-D warnings` on both firmware targets (esp32s3 + QEMU esp32)
+- `make build` / `make build-qemu` build the device firmware / the emulator flash image (build only, no checks)
 - `make test-e2e` automated end-to-end on the emulated device (boot, provision, config flow, geocode, persistence)
 - `make qemu-smoke` CI-shaped boot check; `make qemu-run`/`qemu-stop`/`qemu-provision` interactive emulated device (web ui on http://127.0.0.1:47652)
+- `make ci-host` / `make ci-emulator` exactly what each CI job runs; `make ci-local` replays the workflow locally with act (`ci-local-plan` for a dry run)
 - `make demo` interactive emulated e-paper window
 - `make firmware-flash` / `firmware-monitor` / `provision` real-device targets (need espup + cargo-espflash)
 
 All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries directly, and never build or redirect output by hand; add or extend a make target instead.
 
 ## Before considering work complete
-1. Run `make quality`.
+1. Run `make check` (host) and `make check-firmware` (firmware).
 2. Fix all failures.
-3. Do not weaken or remove quality checks to make them pass.
+3. Do not weaken or remove checks to make them pass.
 4. Do not leave TODO stubs in `core/` (shared contract must stay exact); firmware TODOs are milestone-tracked in `docs/research.md`.
 
 ## Secrets
@@ -57,7 +58,7 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - Closed domains are enums, not strings (`SecretKey`, not `&str` keys; `TimeOfDay`, not `(u8, u8)`). Wire envelopes are typed in core with ts-rs, never hand-mirrored JSON in the web client.
 - Sentinel values are banned: a failed lookup is an error, not `(0.0, 0.0)`; NVS/JSON/migration failures carry a stage-identifying message.
 - Every `unsafe` block carries a `// SAFETY:` comment saying why it is sound. GPIO steals and deep-sleep register calls included.
-- `make fw-build` clippy `-D warnings` on both firmware targets is part of every change, like `make quality` for host code. Fix warnings, never silence them.
+- `make check-firmware` clippy `-D warnings` on both firmware targets is part of every change, like `make check` for host code. Fix warnings, never silence them.
 - Render changes ship with updated snapshot fixtures (`make core-snapshots`) when intentional; a changed diff without a fixture update is a bug.
 - Firmware wake paths must always terminate in deep sleep; an error path that leaves the radio on is a battery bug, not a style issue.
 - New public API surface on `Board`/`Store`/`Secrets` starts private; widen only with a consumer in the same change.
