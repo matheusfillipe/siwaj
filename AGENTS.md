@@ -30,7 +30,7 @@ All web/tooling commands go through the `Makefile`; do not call pnpm/npm/uv/carg
 - `make build` / `make build-qemu` build the device firmware / the emulator flash image (build only, no checks)
 - `make test-e2e` automated end-to-end on the emulated device (boot, provision, config flow, geocode, persistence)
 - `make qemu-smoke` CI-shaped boot check; `make qemu-run`/`qemu-stop`/`qemu-provision` interactive emulated device (web ui on http://127.0.0.1:47652)
-- `make ci-host` / `make ci-emulator` exactly what each CI job runs; `make ci-local` replays the workflow locally with act (`ci-local-plan` for a dry run)
+- `make ci-host-checks` / `make ci-emulator-tests` exactly what each CI job runs (host checks; firmware clippy + boot smoke + device e2e); `make ci-local` replays the workflow locally with act (`ci-local-plan` for a dry run)
 - `make demo` interactive emulated e-paper window
 - `make firmware-flash` / `firmware-monitor` / `provision` real-device targets (need espup + cargo-espflash)
 

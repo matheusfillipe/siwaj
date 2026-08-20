@@ -92,6 +92,8 @@ mod device {
         // both rails are active-low: high = off, minimum sleep current
         pub fn power_down(&mut self) {
             let _ = self.epd_power.set_high();
+            // SAFETY: GPIO42 (audio amp rail) is owned by no other driver; a
+            // momentary steal to latch it off is the only use.
             if let Ok(mut audio) = PinDriver::output(unsafe {
                 esp_idf_svc::hal::gpio::AnyOutputPin::steal(42)
             }) {

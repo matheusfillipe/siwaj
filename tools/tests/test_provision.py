@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from siwaj_tools.provision import load_env
+from siwaj.provision import load_env
 
 
 def write_env(tmp_path: Path, content: str) -> Path:

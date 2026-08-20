@@ -11,8 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-from siwaj_tools import qemu
-from siwaj_tools.provision import load_env
+from siwaj import qemu
+from siwaj.provision import load_env
 
 REPO_ROOT = qemu.REPO_ROOT
 IMAGE = REPO_ROOT / "firmware" / "target-esp32" / "siwaj-smoke.bin"
@@ -97,7 +97,7 @@ def main() -> int:
 
         if has_key:
             print("e2e: provisioning secrets over serial")
-            from siwaj_tools.provision import provision
+            from siwaj.provision import provision
 
             rc = provision(f"socket://127.0.0.1:{qemu.SERIAL_TCP_PORT}", env_path)
             results.append(check("secrets provisioned", rc == 0))

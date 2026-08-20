@@ -28,8 +28,8 @@ EXPECT_LINE = "siwaj awake"
 BOOT_TIMEOUT_SECONDS = 180.0
 RUN_DIR = REPO_ROOT / "firmware" / "target-esp32" / "qemu-dev"
 
-SERIAL_TCP_PORT = 47653
-HTTP_PORT = 47652
+SERIAL_TCP_PORT = int(os.environ.get("SIWAJ_SERIAL_PORT", "47653"))
+HTTP_PORT = int(os.environ.get("SIWAJ_HTTP_PORT", "47652"))
 
 
 def resolve_qemu() -> str | None:

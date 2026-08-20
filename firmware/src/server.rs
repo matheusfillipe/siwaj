@@ -79,6 +79,9 @@ fn reboot_soon() {
         .spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(3));
             log::info!("restarting into the new config");
+            // SAFETY: full SoC restart; the config was persisted to NVS before
+            // this thread was scheduled, and the grace window has let the HTTP
+            // response flush.
             unsafe { esp_idf_svc::sys::esp_restart() }
         })
         .expect("spawn reboot");

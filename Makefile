@@ -144,28 +144,28 @@ qemu-image: qemu-install web-bundle firmware-partitions
 	truncate -s 4M $(QEMU_IMAGE)
 
 qemu-smoke: qemu-image ## boot the emulator image once and check the boot banner (CI check)
-	$(UV) python -m siwaj_tools.qemu smoke $(QEMU_IMAGE)
+	$(UV) python -m siwaj.qemu smoke $(QEMU_IMAGE)
 
 qemu-run: qemu-image ## boot a detached emulated device; web ui on http://127.0.0.1:47652
-	$(UV) python -m siwaj_tools.qemu serve $(QEMU_IMAGE)
+	$(UV) python -m siwaj.qemu serve $(QEMU_IMAGE)
 
 qemu-stop:
-	$(UV) python -m siwaj_tools.qemu stop
+	$(UV) python -m siwaj.qemu stop
 
 qemu-provision: ## push .env secrets into the emulated device over its serial REPL
-	$(UV) python -m siwaj_tools.provision --port socket://127.0.0.1:47653
+	$(UV) python -m siwaj.provision --port socket://127.0.0.1:47653
 
 provision: ## push .env secrets into the real device over USB serial
-	$(UV) python -m siwaj_tools.provision
+	$(UV) python -m siwaj.provision
 
 test-e2e: qemu-image ## run the automated end-to-end suite on the emulated device
-	$(UV) python -m siwaj_tools.e2e
+	$(UV) python -m siwaj.e2e
 
 # --- CI (the Makefile is the single source of truth for what CI runs) ---
 
-ci-host: check ## everything the CI host job runs
+ci-host-checks: check ## everything the CI host job runs (fmt, clippy, tests, typecheck, bundle, ruff, pytest)
 
-ci-emulator: check-firmware qemu-smoke test-e2e ## everything the CI emulator job runs
+ci-emulator-tests: check-firmware qemu-smoke test-e2e ## everything the CI emulator job runs (firmware clippy, boot smoke, device e2e)
 
 ci-local: ## run the real GitHub workflow locally with act (needs Docker)
 	act push -W .github/workflows/ci.yml
@@ -177,7 +177,12 @@ ci-local-plan: ## parse the workflow with act and list what would run, without e
 
 all: build build-qemu ## build every firmware artifact
 
-clean:
+clean: ## remove host build artifacts (cargo target dirs, web bundle)
 	cargo clean
 	rm -rf web/dist
-	cd tools && uv run ruff clean 2>/dev/null || true
+
+clean-firmware: ## remove firmware build artifacts (~2.5G; next build recompiles)
+	rm -rf firmware/target firmware/target-esp32
+
+clean-sdk: ## remove the esp-idf SDK install in .embuild (~4.1G; next build re-downloads)
+	rm -rf firmware/.embuild

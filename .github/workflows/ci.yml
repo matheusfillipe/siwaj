@@ -16,31 +16,31 @@ jobs:
   host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
       - run: make install
-      - run: make ci-host
+      - run: make ci-host-checks
 
   emulator:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,7 @@ jobs:
         with:
           ldproxy: true
           version: 1.95.0.0
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             firmware/.embuild
@@ -56,4 +56,4 @@ jobs:
             firmware/target-esp32
           key: esp32-${{ runner.os }}-${{ hashFiles('firmware/Cargo.lock') }}
       - run: make install
-      - run: make ci-emulator
+      - run: make ci-emulator-tests

@@ -34,6 +34,8 @@ fn main() -> anyhow::Result<()> {
     let nvs_partition = esp_idf_svc::nvs::EspDefaultNvsPartition::take()?;
 
     // stdin needs the UART0 driver attached to VFS; console output works without it
+    // SAFETY: GPIO1/3 are the UART0 TX/RX pads and are handed straight to the
+    // UART0 driver below; nothing else owns them at boot.
     let _uart0_driver = Box::leak(Box::new(
         esp_idf_svc::hal::uart::UartDriver::new(
             peripherals.uart0,
@@ -46,6 +48,8 @@ fn main() -> anyhow::Result<()> {
         )
         .expect("uart0 driver"),
     ));
+    // SAFETY: the UART0 driver was just initialized; this call only attaches
+    // it to the VFS layer so stdin reads reach the driver. Called once.
     unsafe {
         esp_idf_svc::sys::esp_vfs_dev_uart_use_driver(
             esp_idf_svc::sys::uart_port_t_UART_NUM_0 as i32,
@@ -73,10 +77,15 @@ fn main() -> anyhow::Result<()> {
             adc1,
             ..
         } = peripherals;
+        // SAFETY: GPIO17 (battery rail) is not consumed by any Peripherals
+        // driver here, so this steal is the only owner.
         let mut vbat_rail = PinDriver::output(unsafe {
             esp_idf_svc::hal::gpio::Gpio17::steal()
         })?;
         vbat_rail.set_high()?;
+        // SAFETY: raw RTC-register calls that latch GPIO17's current level
+        // (just set high) through deep sleep; without the hold the rail
+        // floats and the board never wakes on battery.
         unsafe {
             esp_idf_svc::sys::gpio_hold_en(board::VBAT_PWR_PIN);
             esp_idf_svc::sys::gpio_deep_sleep_hold_en();
@@ -92,6 +101,7 @@ fn main() -> anyhow::Result<()> {
     let mac = peripherals.mac;
 
     #[cfg(esp32s3)]
+    // SAFETY: GPIO0 (BOOT button) is read-only here; no other driver claims it.
     let boot_held = unsafe {
         use esp_idf_svc::hal::gpio::Gpio0;
         PinDriver::input(Gpio0::steal(), Pull::Up)?.is_low()
@@ -247,6 +257,7 @@ fn run_weather_cycle(
 }
 
 pub(crate) fn now_unix() -> u32 {
+    // SAFETY: libc time(NULL) with a null out-pointer is the documented call.
     let secs = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) };
     u32::try_from(secs).unwrap_or(0)
 }
@@ -297,5 +308,7 @@ fn arm_cycle_watchdog(refresh_secs: u64) {
 #[cfg(esp32s3)]
 fn deep_sleep(secs: u64) -> ! {
     log::info!("deep sleeping for {secs}s");
+    // SAFETY: terminal call; the SoC enters deep sleep and never returns, so
+    // no state after this point is observable.
     unsafe { esp_idf_svc::sys::esp_deep_sleep(secs * 1_000_000) }
 }
