@@ -4,7 +4,7 @@ use embedded_graphics_simulator::sdl2::Keycode;
 use embedded_graphics_simulator::{
     BinaryColorTheme, OutputSettingsBuilder, SimulatorDisplay, SimulatorEvent, Window,
 };
-use siwaj_core::render::{HEIGHT, View, WIDTH, render};
+use siwaj_core::render::{HEIGHT, TimeOfDay, View, WIDTH, render};
 use siwaj_core::{Garment, RainOutlook};
 
 fn view(garment: Garment, pop: u8, expected: bool, feels: f32) -> View {
@@ -16,7 +16,10 @@ fn view(garment: Garment, pop: u8, expected: bool, feels: f32) -> View {
             rain_expected: expected,
         },
         rain_threshold_pct: 30,
-        updated: (14, 32),
+        updated: TimeOfDay {
+            hour: 14,
+            minute: 32,
+        },
         battery_pct: 87,
     }
 }

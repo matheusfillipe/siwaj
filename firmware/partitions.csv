@@ -1,6 +1,9 @@
+# Device layout (8MB flash): factory app + nvs + nvs_key (required for
+# encrypted NVS) + fat storage. Sizes leave the 0x8000 bootloader/table
+# region plus margin below the 8MB chip size.
 # Name,       Type, SubType, Offset,  Size,     Flags
 nvs,          data, nvs,     ,        0x006000,
 nvs_key,      data, nvs_keys,,        0x001000,
 phy_init,     data, phy,     ,        0x001000,
-factory,      app,  factory, ,        0x00400000,
-storage,      data, fat,    ,        ,
+factory,      app,  factory, ,        0x003F0000,
+storage,      data, fat,     ,        0x003F0000,

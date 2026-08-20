@@ -43,7 +43,7 @@ pub fn bring_up(
         sys_loop,
     )?;
 
-    match (ssid, pass) {
+    let ap_mode = match (ssid, pass) {
         (Some(ssid), Some(pass)) if !ssid.is_empty() => {
             let conf = WifiConfiguration::Client(ClientConfiguration {
                 ssid: ssid
@@ -61,6 +61,7 @@ pub fn bring_up(
             wifi.start()?;
             wifi.connect()?;
             wifi.wait_netif_up()?;
+            false
         }
         _ => {
             wifi.set_configuration(&WifiConfiguration::AccessPoint(AccessPointConfiguration {
@@ -71,9 +72,16 @@ pub fn bring_up(
             wifi.start()?;
             wifi.wait_netif_up()?;
             log::info!("softAP 'siwaj' up (no wifi credentials provisioned)");
+            true
         }
-    }
-    let ip_info: IpInfo = wifi.wifi().sta_netif().get_ip_info()?;
+    };
+    // the softAP branch never starts the STA interface, so read the AP netif there
+    let netif = if ap_mode {
+        wifi.wifi().ap_netif()
+    } else {
+        wifi.wifi().sta_netif()
+    };
+    let ip_info: IpInfo = netif.get_ip_info()?;
     log::info!("wifi up: {ip_info:?}");
     Ok(NetUp { wifi })
 }

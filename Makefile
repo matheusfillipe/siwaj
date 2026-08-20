@@ -2,7 +2,7 @@ PNPM := pnpm --dir web
 UV := uv run --project tools
 
 .DEFAULT_GOAL := quality
-.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision build build-release build-qemu test-e2e quality clean
+.PHONY: install fix precommit core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo web-typecheck web-bundle web-watch tools-format tools-format-check tools-lint tools-test firmware-build firmware-lint firmware-partitions fw-build firmware-image firmware-flash firmware-monitor provision qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision build build-release build-qemu test-e2e quality clean
 
 install:
 	$(PNPM) install
@@ -75,31 +75,63 @@ tools-test:
 
 QEMU_VERSION := 9.2.2
 QEMU_DATE := 20260417
-QEMU_URL := https://github.com/espressif/qemu/releases/download/esp-develop-$(QEMU_VERSION)-$(QEMU_DATE)/qemu-xtensa-softmmu-esp_develop_$(QEMU_VERSION)_$(QEMU_DATE)-aarch64-apple-darwin.tar.xz
+QEMU_TAG := esp-develop-$(QEMU_VERSION)-$(QEMU_DATE)
+# release assets are per-OS/arch; map this machine onto espressif's naming
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+QEMU_ARCH := aarch64-apple-darwin
+else
+QEMU_ARCH := x86_64-apple-darwin
+endif
+else
+ifeq ($(shell uname -m),aarch64)
+QEMU_ARCH := aarch64-linux-gnu
+else
+QEMU_ARCH := x86_64-linux-gnu
+endif
+endif
+QEMU_ASSET := qemu-xtensa-softmmu-esp_develop_$(QEMU_VERSION)_$(QEMU_DATE)-$(QEMU_ARCH)
+QEMU_URL := https://github.com/espressif/qemu/releases/download/$(QEMU_TAG)/$(QEMU_ASSET).tar.xz
 QEMU_BIN := tools/bin/qemu/bin/qemu-system-xtensa
 FLASH_IMAGE := firmware/target/siwaj-flash.bin
 
-firmware-build: web-bundle
-	cd firmware && cargo build --release
+# esp-idf resolves the custom partition CSV against its generated project dir,
+# so the filename must be absolute; generated per checkout, never committed
+firmware-partitions:
+	printf 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="%s/partitions.csv"\n' "$$PWD/firmware" > firmware/sdkconfig.partitions
+	printf 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="%s/partitions.esp32.csv"\n' "$$PWD/firmware" > firmware/sdkconfig.partitions-esp32
+
+FW_ENV := ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions" ESP_IDF_SDKCONFIG="$$PWD/sdkconfig"
+FW_ENV_QEMU := ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions-esp32;$$PWD/sdkconfig.esp32" ESP_IDF_SDKCONFIG="$$PWD/target-esp32/sdkconfig"
+
+firmware-build: web-bundle firmware-partitions
+	cd firmware && $(FW_ENV) cargo build --release
+
+firmware-lint: firmware-partitions
+	cd firmware && $(FW_ENV) cargo clippy --release -- -D warnings
+	cd firmware && MCU=esp32 $(FW_ENV_QEMU) cargo clippy --release --target xtensa-esp32-espidf --target-dir target-esp32 -- -D warnings
+
+# fast inner loop: both firmware targets, no host gate (use `make build` for the full gate)
+fw-build: firmware-build firmware-lint qemu-image
 
 # host gate + both firmware targets: everything that must compile before a commit
-build: quality firmware-build qemu-image
+build: quality firmware-build firmware-lint qemu-image
 
 build-release: firmware-build
 
 firmware-image: firmware-build
-	cd firmware && cargo espflash save-image --release --chip esp32s3 --merge --skip-padding target/siwaj-flash.bin
+	cd firmware && $(FW_ENV) cargo espflash save-image --release --chip esp32s3 --merge --skip-padding target/siwaj-flash.bin
 	truncate -s 8M firmware/target/siwaj-flash.bin
 
 firmware-flash: firmware-build
-	cd firmware && ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.secure" cargo espflash flash --release --monitor
+	cd firmware && ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions;$$PWD/sdkconfig.secure" cargo espflash flash --release --monitor
 
 firmware-monitor:
 	cd firmware && cargo espflash monitor
 
 qemu-install:
 	@mkdir -p tools/bin
-	@test -x $(QEMU_BIN) || { curl -sL "$(QEMU_URL)" | tar -xJ -C tools/bin --strip-components=1; }
+	@test -x $(QEMU_BIN) || { curl -sL "$(QEMU_URL)" | tar -xJ -C tools/bin; }
 	$(QEMU_BIN) --version | head -1
 
 # The esp32 QEMU machine emulates OpenETH (the esp32s3 machine hangs on the
@@ -109,8 +141,8 @@ QEMU_IMAGE := firmware/target-esp32/siwaj-smoke.bin
 
 build-qemu: qemu-image
 
-qemu-image: qemu-install web-bundle
-	cd firmware && MCU=esp32 ESP_IDF_SDKCONFIG=$$PWD/sdkconfig.esp32 cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
+qemu-image: qemu-install web-bundle firmware-partitions
+	cd firmware && MCU=esp32 $(FW_ENV_QEMU) cargo espflash save-image --release --chip esp32 --target xtensa-esp32-espidf --target-dir target-esp32 --flash-size 4mb --merge --skip-padding target-esp32/siwaj-smoke.bin
 	truncate -s 4M $(QEMU_IMAGE)
 
 # CI-shaped: boot, wait for the banner, terminate

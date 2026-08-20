@@ -4,6 +4,8 @@
 # issue #99); its esp32 machine is mature. The smoke proves the app boots and
 # runs on emulated hardware; S3-specific behavior is validated on the device.
 CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_ETH_USE_OPENETH=y
 # browsers send ~600B of headers; the 512 default makes the http server reject them

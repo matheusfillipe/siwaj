@@ -9,6 +9,16 @@ CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=4096
 # Target
 CONFIG_IDF_TARGET="esp32s3"
 
+# V2 board: 8MB flash
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=n
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# Custom partition table (factory app + nvs + nvs_key for encrypted NVS + fat
+# storage). The CSV filename is injected as an absolute path by the Makefile
+# (firmware-partitions target) because esp-idf resolves it against its
+# generated project dir, not the crate root.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+
 # Single core: the fetch-sleep loop never needs CPU1, and the QEMU fork's
 # esp32s3 machine stalls booting the second core
 CONFIG_FREERTOS_UNICORE=y

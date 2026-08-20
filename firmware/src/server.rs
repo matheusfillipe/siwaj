@@ -28,6 +28,53 @@ fn serve_gz(req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
     Ok(())
 }
 
+fn serve_json(
+    req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
+    payload: &impl serde::Serialize,
+) -> Result<(), AnyError> {
+    let body = serde_json::to_vec(payload)?;
+    let mut resp = req.into_ok_response()?;
+    resp.write_all(&body)?;
+    resp.flush()?;
+    Ok(())
+}
+
+/// POST /api/config policy: geocode the city, bump the revision, stamp the
+/// time. Storage only happens after this succeeds.
+fn assemble_config(
+    store: &Store,
+    submit: siwaj_core::ConfigSubmit,
+    geocode: Option<(f64, f64)>,
+) -> anyhow::Result<siwaj_core::Config> {
+    use anyhow::Context;
+
+    let Some((lat, lon)) = geocode else {
+        anyhow::bail!(
+            "could not resolve '{}' to coordinates (is the API key provisioned?)",
+            submit.location_name
+        );
+    };
+    let current = store.load().context("stored config unreadable")?;
+    let config = siwaj_core::Config {
+        schema_version: siwaj_core::CONFIG_SCHEMA_VERSION,
+        revision: current
+            .as_ref()
+            .map(|c| c.revision.wrapping_add(1))
+            .unwrap_or(1),
+        date_modified_unix: crate::now_unix(),
+        thresholds: submit.thresholds,
+        rain_threshold_pct: submit.rain_threshold_pct,
+        refresh_minutes: submit.refresh_minutes,
+        location: siwaj_core::Location {
+            name: submit.location_name,
+            lat,
+            lon,
+        },
+    };
+    config.validate().context("invalid config")?;
+    Ok(config)
+}
+
 pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttpServer<'static>, anyhow::Error> {
     let mut server = EspHttpServer::new(&Configuration {
         stack_size: 12288,
@@ -55,17 +102,19 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/api/config", Method::Get, |req| {
-        let config = store.load();
-        let payload = serde_json::json!({
-            "configured": config.is_some(),
-            "revision": config.as_ref().map(|c| c.revision).unwrap_or(0),
-            "config": config,
-        });
-        let body = serde_json::to_vec(&payload)?;
-        let mut resp = req.into_ok_response()?;
-        resp.write_all(&body)?;
-        resp.flush()?;
-        Ok(())
+        let config = match store.load() {
+            Ok(config) => config,
+            Err(e) => {
+                log::error!("stored config unreadable: {e}");
+                None
+            }
+        };
+        let payload = siwaj_core::ConfigState {
+            configured: config.is_some(),
+            revision: config.as_ref().map(|c| c.revision).unwrap_or(0),
+            config,
+        };
+        serve_json(req, &payload)
     })?;
 
     server.fn_handler::<AnyError, _>("/api/config", Method::Post, |mut req| {
@@ -86,46 +135,46 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
             }
         };
         let geocode = weather::geocode(secrets, &submit.location_name);
-        let config = match store.config_from_submit(submit, geocode) {
+        let config = match assemble_config(store, submit, geocode) {
             Ok(c) => c,
             Err(e) => {
                 let mut resp = req.into_status_response(422)?;
-                resp.write_all(e.as_bytes())?;
+                resp.write_all(e.to_string().as_bytes())?;
                 return Ok(());
             }
         };
-        store.save(&config).map_err(|e| anyhow::anyhow!(e))?;
+        store.save(&config)?;
         log::info!("config saved, revision {}", config.revision);
-        let body = serde_json::to_vec(&config)?;
-        let mut resp = req.into_ok_response()?;
-        resp.write_all(&body)?;
-        resp.flush()?;
-        Ok(())
+        serve_json(req, &config)
     })?;
 
     server.fn_handler::<AnyError, _>("/api/weather", Method::Get, |req| {
-        let Some(config) = store.load() else {
-            let mut resp = req.into_status_response(409)?;
-            resp.write_all(b"not configured")?;
-            return Ok(());
+        let config = match store.load() {
+            Ok(Some(config)) => config,
+            Ok(None) => {
+                let mut resp = req.into_status_response(409)?;
+                resp.write_all(b"not configured")?;
+                return Ok(());
+            }
+            Err(e) => {
+                let mut resp = req.into_status_response(500)?;
+                resp.write_all(e.to_string().as_bytes())?;
+                return Ok(());
+            }
         };
         match weather::fetch(secrets, config.location.lat, config.location.lon) {
             Ok(snapshot) => {
-                let max_minutely = snapshot.minutely_mm.iter().copied().fold(0.0_f32, f32::max);
-                let payload = serde_json::json!({
-                    "feelsLikeC": snapshot.feels_like_c,
-                    "hourlyPop": snapshot.hourly_pop,
-                    "maxMinutelyMm": max_minutely,
-                    "timezoneOffsetSecs": snapshot.timezone_offset_secs,
-                });
-                let body = serde_json::to_vec(&payload)?;
-                let mut resp = req.into_ok_response()?;
-                resp.write_all(&body)?;
-                resp.flush()?;
+                let payload = siwaj_core::WeatherProbe {
+                    feels_like_c: snapshot.feels_like_c,
+                    next_hour_pop_frac: snapshot.next_hour_pop_frac,
+                    max_minutely_mm: snapshot.minutely_mm.iter().copied().fold(0.0_f32, f32::max),
+                    timezone_offset_secs: snapshot.timezone_offset_secs,
+                };
+                serve_json(req, &payload)?;
             }
             Err(e) => {
                 let mut resp = req.into_status_response(502)?;
-                resp.write_all(e.as_bytes())?;
+                resp.write_all(e.to_string().as_bytes())?;
             }
         }
         Ok(())

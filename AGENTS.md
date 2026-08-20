@@ -24,8 +24,9 @@ All web/tooling commands go through the `Makefile`; do not call pnpm/npm/uv/carg
 ## Commands (Makefile is SSoT)
 - `make install` pnpm + uv sync plus pre-commit hooks
 - `make quality` the full host gate: cargo fmt/clippy/test, web typecheck + bundle, tools ruff + pytest
-- `make build` everything that must compile: quality + esp32s3 release build + QEMU image
-- `make build-release` / `make build-qemu` the individual firmware targets
+- `make firmware-lint` clippy `-D warnings` on both firmware targets (esp32s3 + QEMU esp32)
+- `make build` everything that must compile: quality + firmware build + firmware lint + QEMU image
+- `make fw-build` fast firmware-only inner loop (build + lint + image)
 - `make fix` autofix pass (cargo fmt/clippy --fix, ruff format)
 - `make test-e2e` automated end-to-end on the emulated device (boot, provision, config flow, geocode, persistence)
 - `make qemu-smoke` CI-shaped boot check; `make qemu-run`/`qemu-stop`/`qemu-provision` interactive emulated device (web ui on http://127.0.0.1:47652)
@@ -48,6 +49,19 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - TS: strict mode, `noUncheckedIndexedAccess`, hand-rolled DOM code, no frameworks, no runtime deps.
 - The JSON wire format is camelCase (serde rename_all on the Rust side, generated TS matches).
 - Python tools: imports at top, no bare `except`, ruff-clean; quality bar is lower by design, do not let tooling concerns leak into core/firmware/web.
+
+## Rust standards
+- Shared logic lives in `core/` with host tests; firmware modules stay thin hardware shells. If a change is testable off-device, it belongs in core.
+- One error protocol per crate: `ConfigError` in core (the contract), `anyhow` everywhere in firmware. No `Result<_, String>` seams; `Context`/`bail` at the source, `e.to_string()` only at the wire.
+- Presence vs corruption are different states: `Result<Option<T>>` for persistence reads; never collapse "unconfigured", "unreadable", and "invalid" into one `None`.
+- Closed domains are enums, not strings (`SecretKey`, not `&str` keys; `TimeOfDay`, not `(u8, u8)`). Wire envelopes are typed in core with ts-rs, never hand-mirrored JSON in the web client.
+- Sentinel values are banned: a failed lookup is an error, not `(0.0, 0.0)`; NVS/JSON/migration failures carry a stage-identifying message.
+- Every `unsafe` block carries a `// SAFETY:` comment saying why it is sound. GPIO steals and deep-sleep register calls included.
+- `make fw-build` clippy `-D warnings` on both firmware targets is part of every change, like `make quality` for host code. Fix warnings, never silence them.
+- Render changes ship with updated snapshot fixtures (`make core-snapshots`) when intentional; a changed diff without a fixture update is a bug.
+- Firmware wake paths must always terminate in deep sleep; an error path that leaves the radio on is a battery bug, not a style issue.
+- New public API surface on `Board`/`Store`/`Secrets` starts private; widen only with a consumer in the same change.
+- Dependencies: firmware declares only what firmware names (shared crates enter via the `siwaj-core` path dependency); unused deps are removed when the compiler stops naming them.
 
 ## Conventions
 - `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.

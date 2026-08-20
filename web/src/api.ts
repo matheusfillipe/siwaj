@@ -1,11 +1,8 @@
+import type { ConfigState } from "./generated/ConfigState";
 import type { Config } from "./generated/Config";
 import type { ConfigSubmit } from "./generated/ConfigSubmit";
 
-export interface ServerState {
-  configured: boolean;
-  revision: number;
-  config: Config | null;
-}
+export type ServerState = ConfigState;
 
 export async function fetchState(): Promise<ServerState> {
   const res = await fetch("/api/config");
@@ -19,6 +16,11 @@ export async function submitConfig(submit: ConfigSubmit): Promise<Config> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(submit),
   });
-  if (!res.ok) throw new Error(`config save failed: ${res.status}`);
+  if (!res.ok) throw new Error(await failureMessage(res));
   return (await res.json()) as Config;
+}
+
+async function failureMessage(res: Response): Promise<string> {
+  const text = await res.text();
+  return text || `config save failed: ${res.status}`;
 }

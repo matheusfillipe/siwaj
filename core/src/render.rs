@@ -38,8 +38,7 @@ impl Framebuffer {
         let buf = &self.buffer;
         (0..HEIGHT).flat_map(move |y| {
             (0..WIDTH).map(move |x| {
-                let index = (y * WIDTH / 8 + x / 8) as usize;
-                let bit = 7 - (x % 8);
+                let (index, bit) = bit_position(x, y);
                 let on = (buf[index] >> bit) & 1 == 0;
                 Pixel(Point::new(x as i32, y as i32), BinaryColor::from(on))
             })
@@ -51,6 +50,12 @@ impl Default for Framebuffer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Single source of the packing convention: 1 bit per pixel, MSB first,
+/// 0 = black (drawn), 1 = white (background).
+fn bit_position(x: u32, y: u32) -> (usize, u32) {
+    ((y * WIDTH / 8 + x / 8) as usize, 7 - (x % 8))
 }
 
 impl DrawTarget for Framebuffer {
@@ -66,8 +71,7 @@ impl DrawTarget for Framebuffer {
             if x >= WIDTH || y >= HEIGHT {
                 continue;
             }
-            let index = (y * WIDTH / 8 + x / 8) as usize;
-            let bit = 7 - (x % 8);
+            let (index, bit) = bit_position(x, y);
             match color {
                 BinaryColor::On => self.buffer[index] &= !(1 << bit),
                 BinaryColor::Off => self.buffer[index] |= 1 << bit,
@@ -83,13 +87,19 @@ impl OriginDimensions for Framebuffer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeOfDay {
+    pub hour: u8,
+    pub minute: u8,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub garment: Garment,
     pub feels_like_c: f32,
     pub rain: RainOutlook,
     pub rain_threshold_pct: u8,
-    pub updated: (u8, u8),
+    pub updated: TimeOfDay,
     pub battery_pct: u8,
 }
 
@@ -227,6 +237,28 @@ const PATTERNS: [&[u8]; 12] = [
     &[0b11, 0b11],
 ];
 
+/// Glyph lookup for the big custom font; None for unsupported characters.
+fn glyph(ch: char) -> Option<&'static [u8]> {
+    match ch {
+        '0'..='9' => Some(PATTERNS[ch as usize - '0' as usize]),
+        '-' => Some(PATTERNS[10]),
+        '\u{00b0}' => Some(PATTERNS[11]),
+        _ => None,
+    }
+}
+
+/// Column count comes from the pattern itself (longest row in bits), so the
+/// degree sign's narrow glyph stays a data property instead of a special case.
+fn glyph_cols(ch: char) -> usize {
+    glyph(ch).map_or(3, |pattern| {
+        pattern
+            .iter()
+            .map(|row| 8 - row.leading_zeros())
+            .max()
+            .unwrap_or(3) as usize
+    })
+}
+
 fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     origin: Point,
@@ -235,13 +267,10 @@ fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
 ) -> Result<(), D::Error> {
     let mut x = origin.x;
     for ch in text.chars() {
-        let pattern = match ch {
-            '0'..='9' => PATTERNS[ch as usize - '0' as usize],
-            '-' => PATTERNS[10],
-            '\u{00b0}' => PATTERNS[11],
-            _ => continue,
+        let Some(pattern) = glyph(ch) else {
+            continue;
         };
-        let pattern_cols = if ch == '\u{00b0}' { 2 } else { 3 };
+        let pattern_cols = glyph_cols(ch) as i32;
         for (ry, row) in pattern.iter().enumerate() {
             for rx in 0..pattern_cols {
                 if (row >> (pattern_cols - 1 - rx)) & 1 == 1 {
@@ -261,9 +290,8 @@ fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
 
 fn big_text_width(text: &str, cell: i32) -> i32 {
     let mut w = 0;
-    for ch in text.chars() {
-        let cols = if ch == '\u{00b0}' { 2 } else { 3 };
-        w += cols * cell + cell;
+    for ch in text.chars().filter(|ch| glyph(*ch).is_some()) {
+        w += glyph_cols(ch) as i32 * cell + cell;
     }
     w - cell
 }
@@ -337,7 +365,7 @@ fn draw_battery<D: DrawTarget<Color = BinaryColor>>(d: &mut D, pct: u8) -> Resul
 
 fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
-    updated: (u8, u8),
+    updated: TimeOfDay,
 ) -> Result<(), D::Error> {
     let (cx, cy) = (86, 166);
     Circle::new(Point::new(cx, cy), 6).into_styled(ON).draw(d)?;
@@ -349,7 +377,7 @@ fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
         .draw(d)?;
     let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     Text::new(
-        &format!("{:02}:{:02}", updated.0, updated.1),
+        &format!("{:02}:{:02}", updated.hour, updated.minute),
         Point::new(cx + 10, cy + 8),
         style,
     )

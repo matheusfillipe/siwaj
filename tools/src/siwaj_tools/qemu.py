@@ -8,12 +8,15 @@ serve: boot detached; HTTP forwarded to 127.0.0.1:<http_port>, serial
 import argparse
 import contextlib
 import os
+import queue
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from typing import TextIO
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 QEMU_CANDIDATES = [
@@ -76,21 +79,39 @@ def smoke(image: Path, machine: str, expect: str, timeout: float) -> int:
     )
     deadline = time.monotonic() + timeout
     assert proc.stdout is not None
+    # a blocking line-iterator would sleep past the deadline on a silent boot;
+    # a reader thread lets the main loop enforce the total-time bound
+    lines: queue.Queue[str] = queue.Queue()
+
+    def reader(stream: TextIO) -> None:
+        for line in stream:
+            lines.put(line)
+
+    threading.Thread(target=reader, args=(proc.stdout,), daemon=True).start()
+
     found = False
+    timed_out = False
     try:
-        for line in proc.stdout:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            try:
+                line = lines.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                continue
             print(line, end="")
             if expect in line:
                 found = True
-                break
-            if time.monotonic() > deadline:
                 break
     finally:
         kill_process_group(proc)
     if found:
         print(f"smoke: '{expect}' seen, PASS")
         return 0
-    print(f"smoke: '{expect}' not seen within {timeout}s, FAIL", file=sys.stderr)
+    reason = "timed out" if timed_out else "output ended"
+    print(f"smoke: '{expect}' not seen ({reason} within {timeout}s), FAIL", file=sys.stderr)
     return 1
 
 

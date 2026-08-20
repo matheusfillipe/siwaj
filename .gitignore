@@ -11,6 +11,8 @@ firmware/target-esp32/
 .embuild/
 firmware/sdkconfig
 firmware/sdkconfig.old
+firmware/sdkconfig.partitions
+firmware/sdkconfig.partitions-esp32
 
 # locally installed QEMU fork (make qemu-install)
 tools/bin/
@@ -38,5 +40,8 @@ htmlcov/
 
 # review gate marker (created by /rev, consumed by commit-guard)
 .rev-ok
+
+# desloppify local state
+.desloppify/
 
 .DS_Store

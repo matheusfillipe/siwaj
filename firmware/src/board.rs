@@ -16,7 +16,7 @@ mod device {
     pub const VBAT_PWR_PIN: i32 = 17;
 
     pub struct Board {
-        pub epd: Epd1in54<
+        epd: Epd1in54<
             SpiDeviceDriver<'static, SpiDriver<'static>>,
             PinDriver<'static, esp_idf_svc::hal::gpio::Input>,
             PinDriver<'static, esp_idf_svc::hal::gpio::Output>,

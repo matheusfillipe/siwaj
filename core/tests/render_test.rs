@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use siwaj_core::render::{Framebuffer, View, render};
+use siwaj_core::render::{Framebuffer, TimeOfDay, View, render};
 use siwaj_core::{Garment, RainOutlook, Thresholds};
 
 const SNAPSHOT_DIR: &str = "tests/snapshots";
@@ -13,7 +13,10 @@ fn view(garment: Garment, rain: RainOutlook, feels_like: f32) -> View {
         feels_like_c: feels_like,
         rain,
         rain_threshold_pct: 30,
-        updated: (14, 32),
+        updated: TimeOfDay {
+            hour: 14,
+            minute: 32,
+        },
         battery_pct: 87,
     }
 }

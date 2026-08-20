@@ -15,6 +15,8 @@ mod weather;
 #[cfg(esp32s3)]
 const WAKE_INTERVAL_SECS: u64 = 30 * 60;
 
+// deep_sleep diverges, so the trailing Ok(()) is unreachable on esp32s3
+#[cfg_attr(esp32s3, allow(unreachable_code))]
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -26,7 +28,7 @@ fn main() -> anyhow::Result<()> {
     let nvs_partition = esp_idf_svc::nvs::EspDefaultNvsPartition::take()?;
 
     // stdin needs the UART0 driver attached to VFS; console output works without it
-    let uart0_driver = Box::leak(Box::new(
+    let _uart0_driver = Box::leak(Box::new(
         esp_idf_svc::hal::uart::UartDriver::new(
             peripherals.uart0,
             unsafe { esp_idf_svc::hal::gpio::AnyOutputPin::steal(1) },
@@ -48,10 +50,16 @@ fn main() -> anyhow::Result<()> {
     let secrets_store = Box::leak(Box::new(secrets::take(nvs_partition.clone())?));
     secrets::spawn_repl(secrets_store);
 
-    let configured = store.load().is_some();
+    let configured = match store.load() {
+        Ok(config) => config.is_some(),
+        Err(e) => {
+            log::error!("stored config unreadable: {e}; entering config mode");
+            true
+        }
+    };
 
     #[cfg(esp32s3)]
-    let (pins, modem, spi2, adc1) = {
+    let hardware = {
         let Peripherals {
             pins,
             modem,
@@ -67,10 +75,13 @@ fn main() -> anyhow::Result<()> {
             esp_idf_svc::sys::gpio_hold_en(board::VBAT_PWR_PIN);
             esp_idf_svc::sys::gpio_deep_sleep_hold_en();
         };
-        (pins, modem, spi2, adc1)
+        Hardware {
+            pins,
+            modem,
+            spi2,
+            adc1,
+        }
     };
-    let _ = uart0_driver;
-
     #[cfg(esp32)]
     let mac = peripherals.mac;
 
@@ -88,20 +99,41 @@ fn main() -> anyhow::Result<()> {
         #[cfg(esp32)]
         run_config_mode(mac, sys_loop, store, secrets_store)?;
         #[cfg(esp32s3)]
-        run_config_mode(modem, sys_loop, nvs_partition, store, secrets_store)?;
+        run_config_mode(
+            hardware.modem,
+            sys_loop,
+            nvs_partition,
+            store,
+            secrets_store,
+        )?;
         return Ok(());
     }
 
     #[cfg(esp32s3)]
     {
-        run_weather_cycle(
-            pins, spi2, adc1, modem, sys_loop, nvs_partition, store, secrets_store,
-        )?;
-        deep_sleep(store);
+        // load once: the cycle and deep_sleep share the same config snapshot
+        let config = match store.load() {
+            Ok(config) => config,
+            Err(e) => {
+                log::error!("stored config unreadable: {e}");
+                None
+            }
+        };
+        // every wake must terminate in deep sleep; a failed cycle only costs
+        // one stale frame, staying awake would cost the battery
+        if let Some(config) = config.as_ref() {
+            if let Err(e) =
+                run_weather_cycle(hardware, sys_loop, nvs_partition, config, secrets_store)
+            {
+                log::error!("weather cycle failed: {e}");
+            }
+        }
+        deep_sleep(config);
     }
     #[cfg(esp32)]
     {
-        // esp32 build exists for QEMU only: always the config-mode path
+        // esp32 build exists for QEMU only: always the config-mode path,
+        // which parks in the server loop and never returns
         run_config_mode(mac, sys_loop, store, secrets_store)?;
     }
     Ok(())
@@ -119,8 +151,8 @@ fn run_config_mode(
     let net = net::bring_up(
         modem,
         sys_loop,
-        secrets_store.get("WIFI_SSID"),
-        secrets_store.get("WIFI_PASS"),
+        secrets_store.get(secrets::SecretKey::WifiSsid),
+        secrets_store.get(secrets::SecretKey::WifiPass),
         nvs_partition,
     )?;
     #[cfg(esp32)]
@@ -138,20 +170,30 @@ fn run_config_mode(
     }
 }
 
+/// The esp32s3 peripherals the weather cycle consumes, grouped so the cycle
+/// signature stays small.
 #[cfg(esp32s3)]
-fn run_weather_cycle(
+struct Hardware {
     pins: esp_idf_svc::hal::gpio::Pins,
     spi2: esp_idf_svc::hal::spi::SPI2<'static>,
     adc1: esp_idf_svc::hal::adc::ADC1<'static>,
     modem: esp_idf_svc::hal::modem::Modem<'static>,
+}
+
+#[cfg(esp32s3)]
+fn run_weather_cycle(
+    hardware: Hardware,
     sys_loop: esp_idf_svc::eventloop::EspSystemEventLoop,
     nvs_partition: esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault>,
-    store: &'static store::Store,
+    config: &siwaj_core::Config,
     secrets_store: &'static secrets::Secrets,
 ) -> anyhow::Result<()> {
-    let config = store
-        .load()
-        .ok_or_else(|| anyhow::anyhow!("no config for weather cycle"))?;
+    let Hardware {
+        pins,
+        spi2,
+        adc1,
+        modem,
+    } = hardware;
     let mut board = board::Board::new(pins, spi2, adc1)?;
 
     // the fetch needs the radio and a valid wall clock; both only exist after
@@ -159,8 +201,8 @@ fn run_weather_cycle(
     let _net = net::bring_up(
         modem,
         sys_loop,
-        secrets_store.get("WIFI_SSID"),
-        secrets_store.get("WIFI_PASS"),
+        secrets_store.get(secrets::SecretKey::WifiSsid),
+        secrets_store.get(secrets::SecretKey::WifiPass),
         nvs_partition,
     )?;
     sync_time();
@@ -168,13 +210,11 @@ fn run_weather_cycle(
     let view = match weather::fetch(secrets_store, config.location.lat, config.location.lon) {
         Ok(snapshot) => {
             let rain = siwaj_core::RainOutlook::from_one_call(
-                snapshot.hourly_pop,
+                snapshot.next_hour_pop_frac,
                 &snapshot.minutely_mm,
             );
             let updated = hhmm(
-                store
-                    .now_unix()
-                    .wrapping_add(snapshot.timezone_offset_secs as u32),
+                now_unix().wrapping_add(snapshot.timezone_offset_secs as u32),
             );
             siwaj_core::render::View {
                 garment: siwaj_core::Garment::from_feels_like(
@@ -198,7 +238,7 @@ fn run_weather_cycle(
                     rain_expected: false,
                 },
                 rain_threshold_pct: config.rain_threshold_pct,
-                updated: hhmm(store.now_unix()),
+                updated: hhmm(now_unix()),
                 battery_pct: board.battery.pct(),
             }
         }
@@ -206,6 +246,11 @@ fn run_weather_cycle(
     board.draw(&view)?;
     board.power_down();
     Ok(())
+}
+
+pub(crate) fn now_unix() -> u32 {
+    let secs = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) };
+    u32::try_from(secs).unwrap_or(0)
 }
 
 fn sync_time() {
@@ -230,17 +275,19 @@ fn sync_time() {
 }
 
 #[cfg(esp32s3)]
-fn hhmm(unix: u32) -> (u8, u8) {
+fn hhmm(unix: u32) -> siwaj_core::render::TimeOfDay {
     let secs_of_day = unix % (24 * 3600);
-    ((secs_of_day / 3600) as u8, ((secs_of_day % 3600) / 60) as u8)
+    siwaj_core::render::TimeOfDay {
+        hour: (secs_of_day / 3600) as u8,
+        minute: ((secs_of_day % 3600) / 60) as u8,
+    }
 }
 
 #[cfg(esp32s3)]
-fn deep_sleep(store: &'static store::Store) -> ! {
-    let secs = store
-        .load()
+fn deep_sleep(config: Option<siwaj_core::Config>) -> ! {
+    let secs = config
         .map(|c| c.refresh_minutes as u64 * 60)
         .unwrap_or(WAKE_INTERVAL_SECS);
     log::info!("deep sleeping for {secs}s");
-    unsafe { esp_idf_svc::sys::esp_deep_sleep((secs * 1_000_000) as u64) }
+    unsafe { esp_idf_svc::sys::esp_deep_sleep(secs * 1_000_000) }
 }

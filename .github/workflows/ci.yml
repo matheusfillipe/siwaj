@@ -29,3 +29,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: make install
       - run: make quality
+
+  emulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: esp-rs/xtensa-toolchain@v1
+        with:
+          ldproxy: true
+          version: 1.95.0.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            firmware/.embuild
+            firmware/target
+            firmware/target-esp32
+          key: esp32-${{ runner.os }}-${{ hashFiles('firmware/Cargo.lock') }}
+      - run: make install
+      - run: make firmware-lint
+      - run: make qemu-smoke
+      - run: make test-e2e

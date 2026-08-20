@@ -1284,7 +1284,6 @@ name = "siwaj-firmware"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "embedded-graphics",
  "embedded-svc",
  "embuild",
  "epd-waveshare",

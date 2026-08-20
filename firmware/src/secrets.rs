@@ -2,19 +2,43 @@ use esp_idf_svc::nvs::{EspNvs, NvsDefault};
 
 const NAMESPACE: &str = "secrets";
 
-// NVS keys are limited to 15 characters; map the .env names to short keys
-const KEY_MAP: [(&str, &str); 3] = [
-    ("OPENWEATHER_API_KEY", "ow_key"),
-    ("WIFI_SSID", "wifi_ssid"),
-    ("WIFI_PASS", "wifi_pass"),
-];
+/// The closed set of provisionable secrets. NVS keys are capped at 15
+/// characters, so each variant maps to a short storage key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretKey {
+    OpenWeatherApiKey,
+    WifiSsid,
+    WifiPass,
+}
 
-fn nvs_key(name: &str) -> Result<&str, String> {
-    KEY_MAP
-        .iter()
-        .find(|(long, _)| *long == name)
-        .map(|(_, short)| *short)
-        .ok_or_else(|| format!("unknown key {name}"))
+impl SecretKey {
+    pub const ALL: [SecretKey; 3] = [
+        SecretKey::OpenWeatherApiKey,
+        SecretKey::WifiSsid,
+        SecretKey::WifiPass,
+    ];
+
+    fn nvs_key(self) -> &'static str {
+        match self {
+            SecretKey::OpenWeatherApiKey => "ow_key",
+            SecretKey::WifiSsid => "wifi_ssid",
+            SecretKey::WifiPass => "wifi_pass",
+        }
+    }
+
+    fn env_name(self) -> &'static str {
+        match self {
+            SecretKey::OpenWeatherApiKey => "OPENWEATHER_API_KEY",
+            SecretKey::WifiSsid => "WIFI_SSID",
+            SecretKey::WifiPass => "WIFI_PASS",
+        }
+    }
+
+    fn from_env_name(name: &str) -> Option<SecretKey> {
+        Self::ALL
+            .into_iter()
+            .find(|key| key.env_name() == name)
+    }
 }
 
 pub struct Secrets {
@@ -29,29 +53,35 @@ pub fn take(
 }
 
 impl Secrets {
-    pub fn get(&self, key: &str) -> Option<String> {
-        let key = nvs_key(key).ok()?;
-        let len = self.nvs.str_len(key).ok()??;
+    /// None means the secret is unset. NVS-level failures are logged and also
+    /// surface as None so callers keep a single fallback path.
+    pub fn get(&self, key: SecretKey) -> Option<String> {
+        let nvs_key = key.nvs_key();
+        let len = match self.nvs.str_len(nvs_key) {
+            Ok(Some(len)) => len,
+            Ok(None) => return None,
+            Err(e) => {
+                log::error!("nvs read of {nvs_key} failed: {e}");
+                return None;
+            }
+        };
         let mut buf = vec![0u8; len];
-        let s = self.nvs.get_str(key, &mut buf).ok()??;
-        Some(s.to_string())
+        match self.nvs.get_str(nvs_key, &mut buf) {
+            Ok(Some(s)) => Some(s.to_string()),
+            Ok(None) => None,
+            Err(e) => {
+                log::error!("nvs read of {nvs_key} failed: {e}");
+                None
+            }
+        }
     }
 
-    pub fn set(&self, key: &str, value: &str) -> Result<(), String> {
-        let key = nvs_key(key)?;
-        self.nvs.set_str(key, value).map_err(|e| e.to_string())
+    pub fn set(&self, key: SecretKey, value: &str) -> anyhow::Result<()> {
+        self.nvs.set_str(key.nvs_key(), value).map_err(anyhow::Error::msg)
     }
 
-    pub fn del(&self, key: &str) -> Result<bool, String> {
-        let key = nvs_key(key)?;
-        self.nvs.remove(key).map_err(|e| e.to_string())
-    }
-
-    pub fn keys(&self) -> Vec<String> {
-        KEY_MAP
-            .iter()
-            .map(|(long, _)| long.to_string())
-            .collect()
+    pub fn del(&self, key: SecretKey) -> anyhow::Result<bool> {
+        self.nvs.remove(key.nvs_key()).map_err(anyhow::Error::msg)
     }
 }
 
@@ -77,24 +107,37 @@ fn repl_loop(secrets: &'static Secrets) {
         }
         let mut parts = line.splitn(3, ' ');
         let reply = match (parts.next(), parts.next(), parts.next()) {
-            (Some("set"), Some(key), Some(val)) => match secrets.set(key, val) {
-                Ok(()) => format!("OK set {key}"),
-                Err(e) => format!("ERR {e}"),
+            (Some("set"), Some(name), Some(val)) => match SecretKey::from_env_name(name) {
+                Some(key) => match secrets.set(key, val) {
+                    Ok(()) => format!("OK set {name}"),
+                    Err(e) => format!("ERR {e}"),
+                },
+                None => format!("ERR unknown key {name}"),
             },
-            (Some("get"), Some(key), None) => match secrets.get(key) {
-                Some(v) => format!("OK {key}={v}"),
-                None => format!("ERR {key} not set"),
+            (Some("get"), Some(name), None) => match SecretKey::from_env_name(name) {
+                Some(key) => match secrets.get(key) {
+                    Some(v) => format!("OK {name}={v}"),
+                    None => format!("ERR {name} not set"),
+                },
+                None => format!("ERR unknown key {name}"),
             },
-            (Some("del"), Some(key), None) => match secrets.del(key) {
-                Ok(true) => format!("OK deleted {key}"),
-                Ok(false) => format!("ERR {key} not set"),
-                Err(e) => format!("ERR {e}"),
+            (Some("del"), Some(name), None) => match SecretKey::from_env_name(name) {
+                Some(key) => match secrets.del(key) {
+                    Ok(true) => format!("OK deleted {name}"),
+                    Ok(false) => format!("ERR {name} not set"),
+                    Err(e) => format!("ERR {e}"),
+                },
+                None => format!("ERR unknown key {name}"),
             },
             (Some("keys"), None, None) => {
                 let mut out = String::from("OK");
-                for k in secrets.keys() {
-                    let known = secrets.get(&k).map(|_| "set").unwrap_or("unset");
-                    out.push_str(&format!(" {k}={known}"));
+                for key in SecretKey::ALL {
+                    let known = if secrets.get(key).is_some() {
+                        "set"
+                    } else {
+                        "unset"
+                    };
+                    out.push_str(&format!(" {}={known}", key.env_name()));
                 }
                 out
             }

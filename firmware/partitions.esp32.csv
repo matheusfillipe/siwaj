@@ -1,0 +1,8 @@
+# QEMU smoke layout (4MB flash): same shape as the device table (nvs +
+# nvs_key for encrypted NVS) with the app taking the remainder; the fat
+# storage partition is device-only.
+# Name,       Type, SubType, Offset,  Size,     Flags
+nvs,          data, nvs,     ,        0x006000,
+nvs_key,      data, nvs_keys,,        0x001000,
+phy_init,     data, phy,     ,        0x001000,
+factory,      app,  factory, ,        0x003E0000,

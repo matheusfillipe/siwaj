@@ -1,4 +1,5 @@
-use siwaj_core::{Config, CONFIG_SCHEMA_VERSION};
+use anyhow::{Context, Result};
+use siwaj_core::Config;
 
 use esp_idf_svc::nvs::{EspNvs, NvsDefault};
 
@@ -17,56 +18,28 @@ pub fn take(
 }
 
 impl Store {
-    pub fn load(&self) -> Option<Config> {
-        let len = self.nvs.blob_len(KEY_CONFIG).ok()??;
+    /// Ok(None): unconfigured (no stored blob). Err: a blob exists but cannot
+    /// be parsed or migrated; callers should log and enter config mode.
+    pub fn load(&self) -> Result<Option<Config>> {
+        let Some(len) = self.nvs.blob_len(KEY_CONFIG).map_err(anyhow::Error::msg)? else {
+            return Ok(None);
+        };
         let mut buf = vec![0u8; len];
-        let _ = self.nvs.get_blob(KEY_CONFIG, &mut buf).ok()??;
-        let raw = serde_json::from_slice::<serde_json::Value>(&buf).ok()?;
-        siwaj_core::migrate(raw).ok()
+        self.nvs
+            .get_blob(KEY_CONFIG, &mut buf)
+            .map_err(anyhow::Error::msg)?;
+        let raw = serde_json::from_slice::<serde_json::Value>(&buf)
+            .context("stored config is not valid JSON")?;
+        siwaj_core::migrate(raw)
+            .map(Some)
+            .context("stored config failed migration")
     }
 
-    pub fn save(&self, config: &Config) -> Result<(), String> {
-        config
-            .validate()
-            .map_err(|e| format!("invalid config: {e}"))?;
-        let buf = serde_json::to_vec(config).map_err(|e| e.to_string())?;
+    pub fn save(&self, config: &Config) -> Result<()> {
+        config.validate().context("invalid config")?;
+        let buf = serde_json::to_vec(config).map_err(anyhow::Error::msg)?;
         self.nvs
             .set_blob(KEY_CONFIG, &buf)
-            .map_err(|e| e.to_string())
-    }
-
-    pub fn next_revision(&self, current: Option<&Config>) -> u32 {
-        current.map(|c| c.revision.wrapping_add(1)).unwrap_or(1)
-    }
-
-    pub fn now_unix(&self) -> u32 {
-        let secs = unsafe { esp_idf_svc::sys::time(std::ptr::null_mut()) };
-        u32::try_from(secs).unwrap_or(0)
-    }
-
-    pub fn config_from_submit(
-        &self,
-        submit: siwaj_core::ConfigSubmit,
-        geocode: Option<(f64, f64)>,
-    ) -> Result<Config, String> {
-        let current = self.load();
-        let (lat, lon) = geocode.unwrap_or((0.0, 0.0));
-        let config = Config {
-            schema_version: CONFIG_SCHEMA_VERSION,
-            revision: self.next_revision(current.as_ref()),
-            date_modified_unix: self.now_unix(),
-            thresholds: submit.thresholds,
-            rain_threshold_pct: submit.rain_threshold_pct,
-            refresh_minutes: submit.refresh_minutes,
-            location: siwaj_core::Location {
-                name: submit.location_name,
-                lat,
-                lon,
-            },
-        };
-        config
-            .validate()
-            .map_err(|e| format!("invalid config: {e}"))?;
-        Ok(config)
+            .map_err(anyhow::Error::msg)
     }
 }

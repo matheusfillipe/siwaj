@@ -1,3 +1,8 @@
+//! Shared contract for siwaj: the user configuration types, the clothing and
+//! rain decision logic, the OpenWeather payload parsing, and the e-paper
+//! render pipeline. Host-testable; the firmware and the generated TypeScript
+//! bindings (ts-rs, camelCase wire format) both consume this crate.
+
 use std::error::Error;
 use std::fmt;
 
@@ -5,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub mod render;
-pub use render::View;
+pub mod weather;
 
 pub const CONFIG_SCHEMA_VERSION: u16 = 1;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
@@ -54,6 +59,25 @@ pub struct ConfigSubmit {
     pub rain_threshold_pct: u8,
     pub refresh_minutes: u16,
     pub location_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ConfigState {
+    pub configured: bool,
+    pub revision: u32,
+    pub config: Option<Config>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WeatherProbe {
+    pub feels_like_c: f32,
+    pub next_hour_pop_frac: f32,
+    pub max_minutely_mm: f32,
+    pub timezone_offset_secs: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
