@@ -412,22 +412,13 @@ fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     updated: TimeOfDay,
 ) -> Result<(), D::Error> {
-    let (cx, cy) = (86, 166);
-    Circle::new(Point::new(cx, cy), 6).into_styled(ON).draw(d)?;
-    Line::new(Point::new(cx, cy), Point::new(cx, cy - 4))
-        .into_styled(ON)
-        .draw(d)?;
-    Line::new(Point::new(cx, cy), Point::new(cx + 3, cy + 1))
-        .into_styled(ON)
-        .draw(d)?;
     let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-    Text::new(
-        &format!("{:02}:{:02}", updated.hour, updated.minute),
-        Point::new(cx + 10, cy + 8),
-        style,
-    )
-    .draw(d)
-    .map(|_| ())
+    let text = format!("{:02}:{:02}", updated.hour, updated.minute);
+    let bb = Text::new(&text, Point::zero(), style).bounding_box();
+    let x = WIDTH as i32 / 2 - bb.size.width as i32 / 2;
+    Text::new(&text, Point::new(x, 166), style)
+        .draw(d)
+        .map(|_| ())
 }
 
 pub fn render(view: &View) -> Framebuffer {
