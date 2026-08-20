@@ -229,26 +229,18 @@ fn run_weather_cycle(
     sync_time();
 
     let view = match weather::fetch(secrets_store, config.location.lat, config.location.lon) {
-        Ok(snapshot) => {
-            let updated = hhmm(
-                now_unix().wrapping_add(snapshot.timezone_offset_secs as u32),
-            );
-            siwaj_core::render::View {
-                garment: siwaj_core::Garment::from_feels_like(
-                    snapshot.feels_like_c,
-                    &config.thresholds,
-                ),
-                feels_like_c: snapshot.feels_like_c,
-                rain: snapshot.rain_outlook(),
-                rain_threshold_pct: config.rain_threshold_pct,
-                updated,
-                battery_pct: board.battery.pct(),
-                offline: false,
-            }
-        }
+        Ok(snapshot) => siwaj_core::render::View::from_snapshot(
+            &snapshot,
+            config,
+            board.battery.pct(),
+            now_unix(),
+        ),
         Err(e) => {
             log::warn!("weather fetch failed: {e}; drawing offline frame");
-            siwaj_core::render::View::offline(hhmm(now_unix()), board.battery.pct())
+            siwaj_core::render::View::offline(
+                siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+                board.battery.pct(),
+            )
         }
     };
     board.draw(&view)?;
@@ -281,15 +273,6 @@ fn sync_time() {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     log::warn!("sntp sync timeout; timestamps will be wrong this cycle");
-}
-
-#[cfg(esp32s3)]
-fn hhmm(unix: u32) -> siwaj_core::render::TimeOfDay {
-    let secs_of_day = unix % (24 * 3600);
-    siwaj_core::render::TimeOfDay {
-        hour: (secs_of_day / 3600) as u8,
-        minute: ((secs_of_day % 3600) / 60) as u8,
-    }
 }
 
 #[cfg(esp32s3)]

@@ -33,6 +33,16 @@ def http_json(method: str, path: str, payload: dict | None = None) -> tuple[int,
         return err.code, err.read().decode(errors="replace")
 
 
+def http_bytes(path: str, timeout: float = 60.0) -> tuple[int, bytes]:
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=timeout) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+    except (urllib.error.URLError, OSError) as err:
+        return 0, str(err).encode()
+
+
 def api_up() -> bool:
     try:
         with urllib.request.urlopen(BASE + "/api/config", timeout=2) as resp:
@@ -143,6 +153,16 @@ def main() -> int:
                 )
             else:
                 results.append(check("GET /api/weather -> 200", False, str(weather)[:80]))
+
+            print("e2e: display frame render")
+            status, frame = http_bytes("/api/frame.bmp")
+            if status == 200:
+                ok = frame[:2] == b"BM" and len(frame) == 54 + 3 * 200 * 200
+                results.append(check("GET /api/frame.bmp -> BMP", ok, f"{len(frame)} bytes"))
+            elif status == 502 and b"returned 40" in frame:
+                results.append(check("frame endpoint answers (plan not activated)", True))
+            else:
+                results.append(check("GET /api/frame.bmp -> BMP", False, str(frame)[:80]))
 
         print("e2e: invalid input rejected")
         status, _ = http_json(

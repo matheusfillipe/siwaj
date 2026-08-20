@@ -103,3 +103,58 @@ fn temp_rounds_and_signs() {
     let fb = render(&v);
     assert!(fb.buffer().iter().any(|&b| b != 0xFF));
 }
+
+#[test]
+fn time_of_day_from_unix() {
+    use siwaj_core::render::TimeOfDay;
+    assert_eq!(TimeOfDay::from_unix(0), TimeOfDay { hour: 0, minute: 0 });
+    assert_eq!(
+        TimeOfDay::from_unix(24 * 3600 + 3661),
+        TimeOfDay { hour: 1, minute: 1 }
+    );
+}
+
+#[test]
+fn view_from_snapshot_maps_every_field() {
+    use siwaj_core::render::{TimeOfDay, View};
+    use siwaj_core::weather::Snapshot;
+
+    let config = siwaj_core::Config::example();
+    let snapshot = Snapshot {
+        feels_like_c: 17.5,
+        minutely_mm: {
+            let mut mm = [0.0_f32; siwaj_core::weather::MINUTELY_LEN];
+            mm[5] = 0.4;
+            mm
+        },
+        next_hour_pop_frac: 0.25,
+        timezone_offset_secs: 3600,
+    };
+    let v = View::from_snapshot(&snapshot, &config, Some(87), 7_200);
+    assert_eq!(v.garment, Garment::Shirt);
+    assert_eq!(v.feels_like_c, 17.5);
+    assert_eq!(v.rain.pop_pct_next_hour, 25);
+    assert!(v.rain.rain_expected);
+    assert_eq!(v.rain_threshold_pct, config.rain_threshold_pct);
+    assert_eq!(v.updated, TimeOfDay { hour: 3, minute: 0 });
+    assert_eq!(v.battery_pct, Some(87));
+    assert!(!v.offline);
+}
+
+#[test]
+fn bmp_is_a_well_formed_24bit_image() {
+    let fb = render(&view(Garment::Jacket, rain(50, true), -3.4));
+    let img = siwaj_core::render::bmp(&fb);
+    assert_eq!(&img[0..2], b"BM");
+    assert_eq!(img.len(), 54 + 3 * 200 * 200);
+    let file_size = u32::from_le_bytes(img[2..6].try_into().unwrap()) as usize;
+    assert_eq!(file_size, img.len());
+    let width = i32::from_le_bytes(img[18..22].try_into().unwrap());
+    let height = i32::from_le_bytes(img[22..26].try_into().unwrap());
+    assert_eq!((width, height), (200, 200));
+    let bpp = u16::from_le_bytes(img[28..30].try_into().unwrap());
+    assert_eq!(bpp, 24);
+    // pixel data starts white and contains black ink
+    assert_eq!(&img[54..57], &[0xFF, 0xFF, 0xFF]);
+    assert!(img[54..].contains(&0x00));
+}

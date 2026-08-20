@@ -122,3 +122,6 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .hidden { display: none; }
 
 output { font-weight: 600; color: var(--ink); }
+
+.preview { margin-top: 1.5rem; text-align: center; cursor: pointer; }
+.preview img { image-rendering: pixelated; border: 1px solid var(--ink); max-width: 100%; }

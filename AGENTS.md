@@ -69,7 +69,7 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.
 - esp32 build = QEMU-only variant (config-mode + OpenETH); esp32s3 build = the real device. Target-specific code is `#[cfg]`-gated; keep both warning-free (`make build`).
-- `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug.
+- `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug. `GET /api/frame.bmp` renders that fetch into the exact e-paper frame as a BMP: live display preview for the emulator and config mode.
 - NVS keys are capped at 15 chars: `Secrets` maps `.env` names to short keys (`ow_key`, `wifi_ssid`, `wifi_pass`).
 - QEMU writes device state into `firmware/target-esp32/qemu-dev/device.bin`; delete it to reset the emulated device (the e2e does this every run).
 - Prose (docs, commits): declarative, terse, no em dashes.

@@ -98,6 +98,17 @@ pub struct TimeOfDay {
     pub minute: u8,
 }
 
+impl TimeOfDay {
+    /// UTC wall time of a unix timestamp.
+    pub fn from_unix(unix: u32) -> TimeOfDay {
+        let secs_of_day = unix % (24 * 3600);
+        TimeOfDay {
+            hour: (secs_of_day / 3600) as u8,
+            minute: ((secs_of_day % 3600) / 60) as u8,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub garment: Garment,
@@ -126,6 +137,28 @@ impl View {
             updated,
             battery_pct,
             offline: true,
+        }
+    }
+
+    /// The frame for a successful One Call fetch; the single mapping from a
+    /// weather snapshot to display state, shared by the device cycle and the
+    /// /api/frame.bmp debug preview.
+    pub fn from_snapshot(
+        snapshot: &crate::weather::Snapshot,
+        config: &crate::Config,
+        battery_pct: Option<u8>,
+        now_unix: u32,
+    ) -> View {
+        View {
+            garment: Garment::from_feels_like(snapshot.feels_like_c, &config.thresholds),
+            feels_like_c: snapshot.feels_like_c,
+            rain: snapshot.rain_outlook(),
+            rain_threshold_pct: config.rain_threshold_pct,
+            updated: TimeOfDay::from_unix(
+                now_unix.wrapping_add(snapshot.timezone_offset_secs as u32),
+            ),
+            battery_pct,
+            offline: false,
         }
     }
 }
@@ -419,6 +452,52 @@ pub fn render(view: &View) -> Framebuffer {
     let mut fb = Framebuffer::new();
     render_to(&mut fb, view);
     fb
+}
+
+/// Fixed 54-byte header for the 24-bit bottom-up BMP this module emits.
+pub fn bmp_header() -> [u8; 54] {
+    let row = WIDTH as usize * 3;
+    let data_len = row * HEIGHT as usize;
+    let mut out = [0u8; 54];
+    out[0..2].copy_from_slice(b"BM");
+    out[2..6].copy_from_slice(&((54 + data_len) as u32).to_le_bytes());
+    out[10..14].copy_from_slice(&54u32.to_le_bytes());
+    out[14..18].copy_from_slice(&40u32.to_le_bytes());
+    out[18..22].copy_from_slice(&(WIDTH as i32).to_le_bytes());
+    out[22..26].copy_from_slice(&(HEIGHT as i32).to_le_bytes());
+    out[26..28].copy_from_slice(&1u16.to_le_bytes());
+    out[28..30].copy_from_slice(&24u16.to_le_bytes());
+    out[34..38].copy_from_slice(&(data_len as u32).to_le_bytes());
+    out[38..42].copy_from_slice(&2835i32.to_le_bytes());
+    out[42..46].copy_from_slice(&2835i32.to_le_bytes());
+    out
+}
+
+/// Writes BMP pixel row `y_from_bottom` (0 = last image row) into `out`,
+/// which must be exactly WIDTH*3 bytes; lets emitters stream instead of
+/// holding the full image in RAM.
+pub fn bmp_row(fb: &Framebuffer, y_from_bottom: usize, out: &mut [u8]) {
+    let y = HEIGHT as usize - 1 - y_from_bottom;
+    let row = out.chunks_exact_mut(3);
+    for (x, px) in row.enumerate() {
+        let (index, bit) = bit_position(x as u32, y as u32);
+        let on = (fb.buffer[index] >> bit) & 1 == 0;
+        let v = if on { 0x00 } else { 0xFF };
+        px.copy_from_slice(&[v, v, v]);
+    }
+}
+
+/// Encodes a frame as a 24-bit bottom-up BMP, the one image format every
+/// browser renders and a device can emit without a compressor.
+pub fn bmp(fb: &Framebuffer) -> Vec<u8> {
+    let mut out = Vec::with_capacity(54 + WIDTH as usize * 3 * HEIGHT as usize);
+    out.extend_from_slice(&bmp_header());
+    let mut row = vec![0u8; WIDTH as usize * 3];
+    for y in 0..HEIGHT as usize {
+        bmp_row(fb, y, &mut row);
+        out.extend_from_slice(&row);
+    }
+    out
 }
 
 pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
