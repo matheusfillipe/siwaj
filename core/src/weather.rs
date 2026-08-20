@@ -59,6 +59,19 @@ struct MinuteStep {
 struct GeoHit {
     lat: f64,
     lon: f64,
+    country: Option<String>,
+    state: Option<String>,
+}
+
+/// Where a city name resolved to. `state` and `country` are what let someone
+/// tell their Springfield from the other one, so they travel with the fix
+/// rather than being dropped at the parser.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeoMatch {
+    pub lat: f64,
+    pub lon: f64,
+    pub region: Option<String>,
+    pub country: Option<String>,
 }
 
 /// Parses a `onecall/timeline/1h` body into the part of a snapshot that does
@@ -93,13 +106,18 @@ pub fn merge_minutely(snapshot: &mut Snapshot, body: &[u8]) -> Result<(), String
 
 /// Parses a geocoding /direct response body, returning the first hit.
 /// Err carries a short reason suitable for logs and 422 bodies.
-pub fn parse_geocode(body: &[u8]) -> Result<(f64, f64), String> {
+pub fn parse_geocode(body: &[u8]) -> Result<GeoMatch, String> {
     let hits: Vec<GeoHit> =
         serde_json::from_slice(body).map_err(|e| format!("geocode payload: {e}"))?;
-    let Some(first) = hits.first() else {
+    let Some(first) = hits.into_iter().next() else {
         return Err("no match for that city name".to_string());
     };
-    Ok((first.lat, first.lon))
+    Ok(GeoMatch {
+        lat: first.lat,
+        lon: first.lon,
+        region: first.state,
+        country: first.country,
+    })
 }
 
 /// Percent-encodes a city name for a query string.
@@ -215,9 +233,28 @@ mod tests {
     }
 
     #[test]
-    fn geocode_takes_first_hit() {
-        let body = br#"[{"lat": 52.5, "lon": 13.4}, {"lat": 1.0, "lon": 2.0}]"#;
-        assert_eq!(parse_geocode(body), Ok((52.5, 13.4)));
+    fn geocode_takes_first_hit_with_its_region() {
+        let body = br#"[
+            {"lat": 52.5, "lon": 13.4, "country": "DE", "state": "Berlin"},
+            {"lat": 1.0, "lon": 2.0}
+        ]"#;
+        assert_eq!(
+            parse_geocode(body),
+            Ok(GeoMatch {
+                lat: 52.5,
+                lon: 13.4,
+                region: Some("Berlin".to_string()),
+                country: Some("DE".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn geocode_tolerates_a_hit_without_a_region() {
+        let body = br#"[{"lat": 1.5, "lon": 2.5}]"#;
+        let hit = parse_geocode(body).unwrap();
+        assert_eq!((hit.lat, hit.lon), (1.5, 2.5));
+        assert_eq!((hit.region, hit.country), (None, None));
     }
 
     #[test]

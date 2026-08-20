@@ -33,7 +33,6 @@ fn rain(pct: u8, expected: bool) -> RainOutlook {
 fn cases() -> Vec<(&'static str, View)> {
     let t = Thresholds {
         low_c: 8.0,
-        mid_c: 15.0,
         high_c: 21.0,
     };
     let mut battery_unknown = view(Garment::from_feels_like(11.0, &t), rain(10, false), 11.0);
@@ -49,11 +48,7 @@ fn cases() -> Vec<(&'static str, View)> {
         ),
         (
             "shirt_rain",
-            view(Garment::from_feels_like(17.5, &t), rain(45, false), 17.5),
-        ),
-        (
-            "tshirt_dry",
-            view(Garment::from_feels_like(24.0, &t), rain(0, false), 24.0),
+            view(Garment::from_feels_like(24.0, &t), rain(45, false), 24.0),
         ),
         ("battery_unknown", battery_unknown),
         (
@@ -97,7 +92,6 @@ fn framebuffer_starts_white() {
 fn temp_rounds_and_signs() {
     let t = Thresholds {
         low_c: 8.0,
-        mid_c: 15.0,
         high_c: 21.0,
     };
     let v = view(Garment::from_feels_like(11.6, &t), rain(0, false), 11.6);
@@ -132,7 +126,11 @@ fn view_from_snapshot_maps_every_field() {
         timezone_offset_secs: 3600,
     };
     let v = View::from_snapshot(&snapshot, &config, Some(87), false, 7_200);
-    assert_eq!(v.garment, Garment::Shirt);
+    assert_eq!(
+        v.garment,
+        Garment::Pullover,
+        "17.5C sits under the example high of 18C"
+    );
     assert_eq!(v.feels_like_c, 17.5);
     assert_eq!(v.rain.pop_pct_next_hour, 25);
     assert!(v.rain.rain_expected);

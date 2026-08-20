@@ -9,6 +9,14 @@
 <body>
   <main class="card">
     <header>
+      <svg class="mark" viewBox="0 0 110 84" role="img" aria-label="siwaj">
+        <g fill="currentColor">
+          <path d="M30 8h25v5l-3 19v48H30z"/>
+          <path d="M80 8H55v5l3 19v48h22z"/>
+          <path d="M30 9h8L14 52 5 46z"/>
+          <path d="M80 9h-8l24 43 9-6z"/>
+        </g>
+      </svg>
       <h1>siwaj</h1>
       <p class="subtitle">should i wear a jacket</p>
     </header>
@@ -21,29 +29,21 @@
     <form id="config-form">
       <label for="city">City</label>
       <input id="city" name="city" type="text" autocomplete="address-level2" placeholder="Berlin" required>
+      <p id="located" class="located"></p>
 
       <fieldset>
         <legend>What to wear, by feels-like &deg;C</legend>
 
-        <div id="bands" class="bands" aria-hidden="true">
+        <div id="bands" class="bands">
           <div class="band" data-band="jacket"><span class="band-name">jacket</span><span class="band-range" id="bandJacket"></span></div>
           <div class="band" data-band="pullover"><span class="band-name">pullover</span><span class="band-range" id="bandPullover"></span></div>
           <div class="band" data-band="shirt"><span class="band-name">shirt</span><span class="band-range" id="bandShirt"></span></div>
-          <div class="band" data-band="tshirt"><span class="band-name">t-shirt</span><span class="band-range" id="bandTshirt"></span></div>
+          <div class="handle" id="handleLow" role="slider" tabindex="0"
+               aria-label="jacket below" aria-valuemin="-10" aria-valuemax="30"></div>
+          <div class="handle" id="handleHigh" role="slider" tabindex="0"
+               aria-label="pullover below" aria-valuemin="-10" aria-valuemax="30"></div>
         </div>
-
-        <div class="slider">
-          <label for="low">jacket below <output id="lowOut" for="low"></output></label>
-          <input id="low" name="low" type="range" min="-10" max="30" step="0.5" required>
-        </div>
-        <div class="slider">
-          <label for="mid">pullover below <output id="midOut" for="mid"></output></label>
-          <input id="mid" name="mid" type="range" min="-10" max="30" step="0.5" required>
-        </div>
-        <div class="slider">
-          <label for="high">shirt below <output id="highOut" for="high"></output></label>
-          <input id="high" name="high" type="range" min="-10" max="30" step="0.5" required>
-        </div>
+        <p class="hint">Drag the two dividers to set where each garment starts.</p>
       </fieldset>
 
       <div class="slider">

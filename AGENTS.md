@@ -3,7 +3,7 @@
 Instructions for AI agents working in this repo. Read before editing.
 
 ## What this is
-Firmware and web config app for the siwaj ("should i wear a jacket") e-paper device: an ESP32-S3-ePaper-1.54 (V2) board that deep sleeps, fetches OpenWeather One Call 4.0, and shows shirt/pullover/jacket plus rain risk on a 200x200 e-paper display.
+Firmware and web config app for the siwaj ("should i wear a jacket") e-paper device: an ESP32-S3-ePaper-1.54 (V2) board that deep sleeps, fetches OpenWeather One Call 4.0, and shows jacket/pullover/shirt plus rain risk on a 200x200 e-paper display.
 
 ## Where things live
 - Shared contract (config types, thresholds, decision logic, TS binding export): `core/`
@@ -65,8 +65,9 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 
 ## Conventions
 - `revision` in `Config` is the user-config version: the device bumps it on every accepted POST `/api/config`; the real device (esp32s3) then restarts into weather mode (3s grace so the response flushes), while the esp32 emulator build just keeps serving with the new config. Web clients sync localStorage against it (client newer than unconfigured device means re-flash happened: client pushes). The UI never shows revisions.
-- `schemaVersion` is the payload shape version; `siwaj-core::migrate` is the single gate. Bump it only with a migration path there.
-- Clothing decision: `feels_like < low -> jacket`, `< mid -> pullover`, `< high -> shirt`, else t-shirt. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold.
+- `schemaVersion` is the payload shape version; `siwaj-core::migrate` is the single gate and accepts only the current version. A bump makes stored configs unreadable, which drops the device into config mode for a fresh setup: that is the migration story, so change the shape freely and bump.
+- Clothing decision: `feels_like < low -> jacket`, `< high -> pullover`, else shirt. Two thresholds, three garments. Rain risk: minutely precip >= 0.1mm within the hour OR hourly pop >= configured threshold; it draws the streaks under the cloud and never changes the garment.
+- Geocoding returns `region` and `country` alongside the fix; they ride in `Location` so the page can show which Springfield it resolved to.
 - Board is V2 (8MB flash / 8MB octal PSRAM). GPIO17 (battery rail) must be high with `gpio_hold` through deep sleep or the board never wakes on battery.
 - esp32 build = QEMU-only variant (config-mode + OpenETH); esp32s3 build = the real device. Target-specific code is `#[cfg]`-gated; keep both warning-free (`make build`).
 - One Call 4.0 serves each resolution from its own endpoint, so a weather cycle spends two requests: `timeline/1h` for feels-like, next-hour pop and the zone offset, `timeline/1min` for the precipitation trace. `core::weather::parse_hourly` then `merge_minutely` fold both into one `Snapshot`; `timeline/1h`'s `data[0]` is the current hour bucket, so feels-like is that hour's value. Budget two calls per wake against the account's daily cap.

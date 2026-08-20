@@ -41,10 +41,6 @@ fn cases() -> Vec<(&'static str, View)> {
             view(Garment::Shirt, 45, false, 17.5),
         ),
         (
-            "4: t-shirt, 24C, dry",
-            view(Garment::TShirt, 0, false, 24.0),
-        ),
-        (
             "5: offline, safe jacket",
             View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41), true),
         ),

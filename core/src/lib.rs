@@ -12,7 +12,7 @@ use ts_rs::TS;
 pub mod render;
 pub mod weather;
 
-pub const CONFIG_SCHEMA_VERSION: u16 = 1;
+pub const CONFIG_SCHEMA_VERSION: u16 = 2;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
 pub const RAIN_THRESHOLD_PCT_DEFAULT: u8 = 30;
 
@@ -23,18 +23,23 @@ const MINUTELY_RAIN_MM_THRESHOLD: f32 = 0.1;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
+/// `region` and `country` come back from geocoding and exist so the page can
+/// show which of the world's several Springfields it actually resolved to.
 pub struct Location {
     pub name: String,
     pub lat: f64,
     pub lon: f64,
+    pub region: Option<String>,
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
+/// Two edges cutting the feels-like axis into the three garments. Below
+/// `low_c` is a jacket, below `high_c` a pullover, above it a shirt.
 pub struct Thresholds {
     pub low_c: f32,
-    pub mid_c: f32,
     pub high_c: f32,
 }
 
@@ -108,19 +113,16 @@ pub enum Garment {
     Jacket,
     Pullover,
     Shirt,
-    TShirt,
 }
 
 impl Garment {
     pub fn from_feels_like(feels_like_c: f32, t: &Thresholds) -> Garment {
         if feels_like_c < t.low_c {
             Garment::Jacket
-        } else if feels_like_c < t.mid_c {
-            Garment::Pullover
         } else if feels_like_c < t.high_c {
-            Garment::Shirt
+            Garment::Pullover
         } else {
-            Garment::TShirt
+            Garment::Shirt
         }
     }
 }
@@ -164,7 +166,7 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::ThresholdOrder => write!(f, "thresholds must satisfy low < mid < high"),
+            ConfigError::ThresholdOrder => write!(f, "thresholds must satisfy low < high"),
             ConfigError::RainThreshold => write!(f, "rain threshold must be 0..=100"),
             ConfigError::RefreshWindow => write!(f, "refresh minutes must be 5..=240"),
             ConfigError::Latitude => write!(f, "latitude must be -90..=90"),
@@ -197,9 +199,7 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if !(self.thresholds.low_c < self.thresholds.mid_c
-            && self.thresholds.mid_c < self.thresholds.high_c)
-        {
+        if self.thresholds.low_c >= self.thresholds.high_c {
             return Err(ConfigError::ThresholdOrder);
         }
         if self.rain_threshold_pct > 100 {
@@ -227,8 +227,7 @@ impl Config {
             date_modified_unix: 0,
             thresholds: Thresholds {
                 low_c: 8.0,
-                mid_c: 15.0,
-                high_c: 21.0,
+                high_c: 18.0,
             },
             rain_threshold_pct: RAIN_THRESHOLD_PCT_DEFAULT,
             refresh_minutes: REFRESH_MINUTES_DEFAULT,
@@ -236,6 +235,8 @@ impl Config {
                 name: "Example City".to_string(),
                 lat: 52.52,
                 lon: 13.405,
+                region: None,
+                country: None,
             },
         }
     }
@@ -280,15 +281,12 @@ mod tests {
     fn garment_boundaries() {
         let t = Thresholds {
             low_c: 10.0,
-            mid_c: 16.0,
             high_c: 22.0,
         };
         assert_eq!(Garment::from_feels_like(9.9, &t), Garment::Jacket);
         assert_eq!(Garment::from_feels_like(10.0, &t), Garment::Pullover);
-        assert_eq!(Garment::from_feels_like(15.9, &t), Garment::Pullover);
-        assert_eq!(Garment::from_feels_like(16.0, &t), Garment::Shirt);
-        assert_eq!(Garment::from_feels_like(21.9, &t), Garment::Shirt);
-        assert_eq!(Garment::from_feels_like(22.0, &t), Garment::TShirt);
+        assert_eq!(Garment::from_feels_like(21.9, &t), Garment::Pullover);
+        assert_eq!(Garment::from_feels_like(22.0, &t), Garment::Shirt);
     }
 
     #[test]
@@ -328,9 +326,8 @@ mod tests {
     fn validate_rejects_disordered_thresholds() {
         let mut c = valid();
         c.thresholds = Thresholds {
-            low_c: 20.0,
-            mid_c: 10.0,
-            high_c: 30.0,
+            low_c: 30.0,
+            high_c: 10.0,
         };
         assert_eq!(c.validate(), Err(ConfigError::ThresholdOrder));
     }
@@ -385,7 +382,23 @@ mod tests {
         raw.as_object_mut().unwrap().remove("schemaVersion");
         assert_eq!(migrate(raw), Err(ConfigError::SchemaVersion));
 
-        let bad = json!({"schemaVersion": 1, "hello": "world"});
+        let bad = json!({"schemaVersion": CONFIG_SCHEMA_VERSION, "hello": "world"});
         assert_eq!(migrate(bad), Err(ConfigError::Malformed));
+    }
+
+    #[test]
+    fn the_four_garment_schema_is_not_readable() {
+        // dropping the t-shirt changed the shape rather than extending it, so
+        // a device holding the old config re-runs setup instead of migrating
+        let old = json!({
+            "schemaVersion": 1,
+            "revision": 4,
+            "dateModifiedUnix": 0,
+            "thresholds": {"lowC": 8.0, "midC": 15.0, "highC": 21.0},
+            "rainThresholdPct": 30,
+            "refreshMinutes": 30,
+            "location": {"name": "Berlin", "lat": 52.5, "lon": 13.4},
+        });
+        assert_eq!(migrate(old), Err(ConfigError::UnsupportedSchema(1)));
     }
 }

@@ -125,7 +125,7 @@ def main() -> int:
 
         print("e2e: save config")
         submit = {
-            "thresholds": {"lowC": 8, "midC": 15, "highC": 21},
+            "thresholds": {"lowC": 8, "highC": 18},
             "rainThresholdPct": 30,
             "refreshMinutes": 30,
             "locationName": "Berlin",
@@ -214,7 +214,7 @@ def main() -> int:
 
         print("e2e: invalid input rejected")
         status, _ = http_json(
-            "POST", "/api/config", {**submit, "thresholds": {"lowC": 20, "midC": 10, "highC": 30}}
+            "POST", "/api/config", {**submit, "thresholds": {"lowC": 30, "highC": 10}}
         )
         results.append(check("disordered thresholds -> 422", status == 422))
     finally:

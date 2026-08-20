@@ -4,7 +4,7 @@ use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 
 use crate::secrets::{SecretKey, Secrets};
 
-pub use siwaj_core::weather::{Snapshot, merge_minutely, parse_geocode, parse_hourly};
+pub use siwaj_core::weather::{GeoMatch, Snapshot, merge_minutely, parse_geocode, parse_hourly};
 
 const ONE_CALL: &str = "https://api.openweathermap.org/data/4.0/onecall";
 
@@ -53,7 +53,7 @@ pub fn fetch(secrets: &Secrets, lat: f64, lon: f64) -> anyhow::Result<Snapshot> 
     Ok(snapshot)
 }
 
-pub fn geocode(secrets: &Secrets, city: &str) -> anyhow::Result<(f64, f64)> {
+pub fn geocode(secrets: &Secrets, city: &str) -> anyhow::Result<GeoMatch> {
     let key = secrets
         .get(SecretKey::OpenWeatherApiKey)
         .context("no OPENWEATHER_API_KEY provisioned")?;

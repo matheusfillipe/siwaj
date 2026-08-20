@@ -44,11 +44,11 @@ fn serve_json(
 fn assemble_config(
     store: &Store,
     submit: siwaj_core::ConfigSubmit,
-    geocode: anyhow::Result<(f64, f64)>,
+    geocode: anyhow::Result<weather::GeoMatch>,
 ) -> anyhow::Result<siwaj_core::Config> {
     use anyhow::Context;
 
-    let (lat, lon) = geocode.context("geocoding failed")?;
+    let found = geocode.context("geocoding failed")?;
     let current = store.load().context("stored config unreadable")?;
     let config = siwaj_core::Config {
         schema_version: siwaj_core::CONFIG_SCHEMA_VERSION,
@@ -62,8 +62,10 @@ fn assemble_config(
         refresh_minutes: submit.refresh_minutes,
         location: siwaj_core::Location {
             name: submit.location_name,
-            lat,
-            lon,
+            lat: found.lat,
+            lon: found.lon,
+            region: found.region,
+            country: found.country,
         },
     };
     config.validate().context("invalid config")?;

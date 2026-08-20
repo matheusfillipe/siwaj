@@ -2,7 +2,7 @@
 
 Should i wear a jacket? This little e-paper sign answers before you finish asking.
 
-It is a Waveshare ESP32-S3-ePaper-1.54 (V2) board with a 200x200 e-ink display. The firmware sleeps in a drawer, wakes up every half hour, asks OpenWeather how it feels outside, and draws one of four garments (jacket, pullover, shirt, t-shirt) plus a rain risk warning. Then it goes back to sleep for another half hour, which is why a small battery is designed to last months. If nobody configured it yet, it turns into a wifi hotspot and serves its own config page. Type your city, pick thresholds, done.
+It is a Waveshare ESP32-S3-ePaper-1.54 (V2) board with a 200x200 e-ink display. The firmware sleeps in a drawer, wakes up every half hour, asks OpenWeather how it feels outside, and draws one of three garments (jacket, pullover, shirt) plus a rain risk warning. Then it goes back to sleep for another half hour, which is why a small battery is designed to last months. If nobody configured it yet, it turns into a wifi hotspot and serves its own config page. Type your city, pick thresholds, done.
 
 The name is short for "should i wear a jacket". The README is mostly the name.
 

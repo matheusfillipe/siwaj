@@ -19,7 +19,6 @@ const ON: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor:
 const FILL: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
 const SLEEVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 9);
 const CARVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::Off);
-const CARVE_S1: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 1);
 const CARVE_S3: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::Off, 3);
 
 pub struct Framebuffer {
@@ -223,63 +222,50 @@ fn draw_jacket<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Res
     Ok(())
 }
 
-/// Crew neck and ribbed hem and cuffs: closed like the shirt, but banded, and
-/// cut wider so it reads as the warmer of the two.
+/// The middle one: long sleeves like the jacket but closed, and banded at the
+/// neck, cuffs and hem. The bands are the weight cue, so they are carved wide
+/// enough to survive the panel.
 fn draw_pullover<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     b: &Bounds,
 ) -> Result<(), D::Error> {
-    Rectangle::with_corners(px(b, 0.33, 0.12), px(b, 0.67, 0.96))
+    Rectangle::with_corners(px(b, 0.32, 0.12), px(b, 0.68, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.35, 0.16), px(b, 0.11, 0.64))
+    Line::new(px(b, 0.34, 0.16), px(b, 0.10, 0.66))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.65, 0.16), px(b, 0.89, 0.64))
+    Line::new(px(b, 0.66, 0.16), px(b, 0.90, 0.66))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Circle::new(px(b, 0.43, 0.02), 15)
+    Circle::new(px(b, 0.42, 0.02), 17)
         .into_styled(CARVE)
         .draw(d)?;
-    Line::new(px(b, 0.35, 0.86), px(b, 0.65, 0.86))
-        .into_styled(CARVE_S1)
+    Line::new(px(b, 0.09, 0.57), px(b, 0.17, 0.61))
+        .into_styled(CARVE_S3)
         .draw(d)?;
-    Line::new(px(b, 0.35, 0.91), px(b, 0.65, 0.91))
-        .into_styled(CARVE_S1)
+    Line::new(px(b, 0.91, 0.57), px(b, 0.83, 0.61))
+        .into_styled(CARVE_S3)
+        .draw(d)?;
+    Line::new(px(b, 0.34, 0.87), px(b, 0.66, 0.87))
+        .into_styled(CARVE_S3)
         .draw(d)?;
     Ok(())
 }
 
-/// Closed body and the narrowest cut, with an open collar notched into the
-/// shoulders. Closed against the jacket's split front, V-necked against the
-/// pullover's round one.
+/// The warmest one, so the lightest garment: short sleeves and a collar. The
+/// sleeve length is what separates it from the pullover across the room.
 fn draw_shirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    Rectangle::with_corners(px(b, 0.37, 0.14), px(b, 0.63, 0.96))
+    Rectangle::with_corners(px(b, 0.35, 0.14), px(b, 0.65, 0.96))
         .into_styled(FILL)
         .draw(d)?;
-    Line::new(px(b, 0.39, 0.18), px(b, 0.17, 0.60))
+    Line::new(px(b, 0.37, 0.20), px(b, 0.16, 0.40))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Line::new(px(b, 0.61, 0.18), px(b, 0.83, 0.60))
+    Line::new(px(b, 0.63, 0.20), px(b, 0.84, 0.40))
         .into_styled(SLEEVE)
         .draw(d)?;
-    Triangle::new(px(b, 0.43, 0.12), px(b, 0.57, 0.12), px(b, 0.5, 0.28))
-        .into_styled(CARVE)
-        .draw(d)?;
-    Ok(())
-}
-
-fn draw_tshirt<D: DrawTarget<Color = BinaryColor>>(d: &mut D, b: &Bounds) -> Result<(), D::Error> {
-    Rectangle::with_corners(px(b, 0.34, 0.12), px(b, 0.66, 0.96))
-        .into_styled(FILL)
-        .draw(d)?;
-    Line::new(px(b, 0.36, 0.18), px(b, 0.14, 0.36))
-        .into_styled(SLEEVE)
-        .draw(d)?;
-    Line::new(px(b, 0.64, 0.18), px(b, 0.86, 0.36))
-        .into_styled(SLEEVE)
-        .draw(d)?;
-    Rectangle::with_corners(px(b, 0.40, 0.07), px(b, 0.60, 0.16))
+    Triangle::new(px(b, 0.41, 0.12), px(b, 0.59, 0.12), px(b, 0.5, 0.36))
         .into_styled(CARVE)
         .draw(d)?;
     Ok(())
@@ -299,7 +285,6 @@ fn draw_garment<D: DrawTarget<Color = BinaryColor>>(
         Garment::Jacket => draw_jacket(d, &b),
         Garment::Pullover => draw_pullover(d, &b),
         Garment::Shirt => draw_shirt(d, &b),
-        Garment::TShirt => draw_tshirt(d, &b),
     }
 }
 
