@@ -32,4 +32,4 @@ make qemu-run        # emulated device on http://127.0.0.1:47652
 make demo            # the e-paper face itself, in a window
 ```
 
-`make help` lists the rest. Hardware notes, decisions and the full plan live in [docs/research.md](docs/research.md).
+`make help` lists the rest.

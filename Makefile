@@ -9,7 +9,7 @@ UV := uv run --project tools
         tools-format tools-format-check tools-lint tools-test \
         firmware-partitions build build-qemu firmware-image firmware-flash firmware-monitor \
         qemu-install qemu-image qemu-smoke qemu-run qemu-stop qemu-provision provision test-e2e \
-        ci-host ci-emulator ci-local ci-local-plan \
+        ci-host-checks ci-emulator-tests ci-local ci-local-plan \
         all clean
 
 help: ## list available targets

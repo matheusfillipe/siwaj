@@ -6,7 +6,6 @@ Instructions for AI agents working in this repo. Read before editing.
 Firmware and web config app for the siwaj ("should i wear a jacket") e-paper device: an ESP32-S3-ePaper-1.54 (V2) board that deep sleeps, fetches OpenWeather One Call 3.0, and shows shirt/pullover/jacket plus rain risk on a 200x200 e-paper display.
 
 ## Where things live
-- Research, hardware facts, decisions, full plan: `docs/research.md`
 - Shared contract (config types, thresholds, decision logic, TS binding export): `core/`
 - Firmware (esp-idf std Rust, xtensa esp32s3): `firmware/` (excluded from the host workspace; needs `espup`)
 - Web config page (vanilla TS, no framework, single minified bundle): `web/`
@@ -40,7 +39,7 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 1. Run `make check` (host) and `make check-firmware` (firmware).
 2. Fix all failures.
 3. Do not weaken or remove checks to make them pass.
-4. Do not leave TODO stubs in `core/` (shared contract must stay exact); firmware TODOs are milestone-tracked in `docs/research.md`.
+4. Do not leave TODO stubs in `core/` (shared contract must stay exact).
 
 ## Secrets
 `OPENWEATHER_API_KEY` lives only in `.env` (gitignored) and in the device's encrypted NVS, provisioned via `make provision`. Never embed it in firmware, web assets, tests, or docs.
