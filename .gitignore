@@ -45,3 +45,6 @@ htmlcov/
 .desloppify/
 
 .DS_Store
+
+# browser automation artifacts
+.playwright-mcp/

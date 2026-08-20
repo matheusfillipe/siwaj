@@ -11,6 +11,7 @@ import os
 import queue
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -30,6 +31,54 @@ RUN_DIR = REPO_ROOT / "firmware" / "target-esp32" / "qemu-dev"
 
 SERIAL_TCP_PORT = int(os.environ.get("SIWAJ_SERIAL_PORT", "47653"))
 HTTP_PORT = int(os.environ.get("SIWAJ_HTTP_PORT", "47652"))
+
+
+PARTITION_TABLE_OFFSET = 0x8000
+PARTITION_ENTRY_LEN = 32
+PARTITION_MAGIC = b"\xaa\x50"
+DATA_TYPE = 0x01
+NVS_SUBTYPES = frozenset({0x02, 0x04})  # nvs, nvs_keys
+
+
+def nvs_partitions(image: bytes) -> dict[str, tuple[int, int]]:
+    """label -> (offset, size) for the NVS partitions in a flash image, read
+    from the image's own partition table so a layout change cannot desync it
+    from partitions.esp32.csv."""
+    found = {}
+    pos = PARTITION_TABLE_OFFSET
+    while pos + PARTITION_ENTRY_LEN <= len(image):
+        entry = image[pos : pos + PARTITION_ENTRY_LEN]
+        if entry[:2] != PARTITION_MAGIC:
+            break
+        offset, size = struct.unpack("<II", entry[4:12])
+        if entry[2] == DATA_TYPE and entry[3] in NVS_SUBTYPES:
+            found[entry[12:28].rstrip(b"\x00").decode("ascii", "replace")] = (offset, size)
+        pos += PARTITION_ENTRY_LEN
+    return found
+
+
+def refresh_device_image(image: Path, device_image: Path) -> str:
+    """Boot whatever was just built while the emulated device keeps what it
+    stored. Everything comes from the fresh image except the NVS partitions,
+    which are spliced over from the running device, so a rebuild never leaves
+    stale firmware serving and never costs the config and secrets."""
+    fresh = image.read_bytes()
+    if not device_image.is_file():
+        device_image.write_bytes(fresh)
+        return "new device"
+    previous = device_image.read_bytes()
+    carried = nvs_partitions(previous)
+    merged = bytearray(fresh)
+    kept = []
+    for label, (offset, size) in nvs_partitions(fresh).items():
+        if label not in carried:
+            continue
+        was_offset, was_size = carried[label]
+        chunk = previous[was_offset : was_offset + min(size, was_size)]
+        merged[offset : offset + len(chunk)] = chunk
+        kept.append(label)
+    device_image.write_bytes(bytes(merged))
+    return f"firmware refreshed, kept {'+'.join(kept)}" if kept else "new device"
 
 
 def resolve_qemu() -> str | None:
@@ -138,11 +187,9 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
     stop(pid_file)
 
     # QEMU writes NVS straight into the flash image: run a working copy so the
-    # build artifact stays pristine. The copy is kept across runs so the
-    # emulated device holds its config like the real one; the e2e deletes it
-    # to force the first-setup path.
-    if not device_image.is_file():
-        shutil.copyfile(image, device_image)
+    # build artifact stays pristine. The e2e deletes the copy to force the
+    # first-setup path.
+    state = refresh_device_image(image, device_image)
 
     cmd = base_cmd(
         device_image,
@@ -174,6 +221,7 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
             print(f"qemu dev device up (pid {proc.pid})")
             print(f"  web ui  : http://127.0.0.1:{HTTP_PORT}")
             print(f"  serial  : socket://127.0.0.1:{SERIAL_TCP_PORT} (make qemu-provision)")
+            print(f"  state   : {state}")
             print(f"  log     : {log_file}")
             print("  stop    : make qemu-stop")
             load_env_secrets()
