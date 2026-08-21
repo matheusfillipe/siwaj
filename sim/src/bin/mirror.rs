@@ -21,7 +21,9 @@ const INTERVAL: Duration = Duration::from_secs(1);
 /// The bench controls sit on keys so the window is the whole workbench:
 /// r refresh, c charger, b button, s sleep, q quit.
 fn main() {
-    let addr = std::env::var("SIWAJ_DEVICE_ADDR").unwrap_or_else(|_| "127.0.0.1:47652".into());
+    // the panel port keeps answering while config mode is down, which is what
+    // lets the window show the device going to sleep
+    let addr = std::env::var("SIWAJ_PANEL_ADDR").unwrap_or_else(|_| "127.0.0.1:47654".into());
     let scale: u32 = std::env::args()
         .nth(1)
         .and_then(|s| s.parse().ok())

@@ -18,13 +18,19 @@ REPO_ROOT = qemu.REPO_ROOT
 IMAGE = REPO_ROOT / "firmware" / "target-esp32" / "siwaj-smoke.bin"
 HTTP_PORT = qemu.HTTP_PORT
 BASE = f"http://127.0.0.1:{HTTP_PORT}"
+PANEL = f"http://127.0.0.1:{qemu.PANEL_PORT}"
 FRAME_BYTES = 200 * 200 // 8
 
 
-def http_json(method: str, path: str, payload: dict | None = None) -> tuple[int, dict | str]:
+def http_json(
+    method: str, path: str, payload: dict | None = None, base: str = ""
+) -> tuple[int, dict | str]:
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
-        BASE + path, data=data, method=method, headers={"content-type": "application/json"}
+        (base or BASE) + path,
+        data=data,
+        method=method,
+        headers={"content-type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -34,9 +40,9 @@ def http_json(method: str, path: str, payload: dict | None = None) -> tuple[int,
         return err.code, err.read().decode(errors="replace")
 
 
-def http_bytes(path: str, timeout: float = 60.0) -> tuple[int, bytes, str]:
+def http_bytes(path: str, timeout: float = 60.0, base: str = "") -> tuple[int, bytes, str]:
     try:
-        with urllib.request.urlopen(BASE + path, timeout=timeout) as resp:
+        with urllib.request.urlopen((base or BASE) + path, timeout=timeout) as resp:
             return resp.status, resp.read(), resp.headers.get("X-Siwaj-Frame", "")
     except urllib.error.HTTPError as err:
         return err.code, err.read(), ""
@@ -50,7 +56,7 @@ def await_frame(timeout: float = 120.0) -> tuple[int, bytes, str]:
     deadline = time.monotonic() + timeout
     status, body, face = 0, b"", ""
     while time.monotonic() < deadline:
-        status, body, face = http_bytes("/api/frame")
+        status, body, face = http_bytes("/api/frame", base=PANEL)
         if status == 200:
             break
         time.sleep(2)
@@ -63,7 +69,7 @@ def await_change(path: str, previous: bytes, timeout: float = 30.0) -> tuple[int
     deadline = time.monotonic() + timeout
     status, body, face = 0, previous, ""
     while time.monotonic() < deadline:
-        status, body, face = http_bytes(path)
+        status, body, face = http_bytes(path, base=PANEL)
         if body != previous:
             break
         time.sleep(1)
@@ -128,6 +134,7 @@ def main() -> int:
             "thresholds": {"lowC": 8, "highC": 18},
             "rainThresholdPct": 30,
             "refreshMinutes": 30,
+            "awakeMinutes": 10,
             "locationName": "Berlin",
         }
         status, saved = http_json("POST", "/api/config", submit)
@@ -191,14 +198,14 @@ def main() -> int:
         # the simulated battery drains a percent a minute and the level is
         # drawn as text, so frames are compared for difference, never equality
         # against one captured earlier
-        _, before_charge, _ = http_bytes("/api/frame")
-        status, charged = http_json("POST", "/api/sim", {"charging": True})
+        _, before_charge, _ = http_bytes("/api/frame", base=PANEL)
+        status, charged = http_json("POST", "/api/sim", {"charging": True}, base=PANEL)
         results.append(
             check("POST /api/sim -> 200", status == 200 and charged == {"charging": True})
         )
         _, plugged, _ = await_change("/api/frame", before_charge)
         results.append(check("charging redraws the frame", plugged != before_charge))
-        http_json("POST", "/api/sim", {"charging": False})
+        http_json("POST", "/api/sim", {"charging": False}, base=PANEL)
         _, unplugged, _ = await_change("/api/frame", plugged)
         results.append(check("unplugging redraws it again", unplugged != plugged))
 

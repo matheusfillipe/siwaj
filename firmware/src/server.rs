@@ -13,6 +13,11 @@ static APP_GZ: &[u8] = include_bytes!("../../web/dist/app.js.gz");
 
 type AnyError = anyhow::Error;
 
+/// The emulator answers the panel mirror on its own port so that server can
+/// stay up while config mode comes and goes.
+#[cfg(esp32)]
+pub const PANEL_PORT: u16 = 81;
+
 fn serve_gz(req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>, body: &[u8], ctype: &str) -> Result<(), AnyError> {
     crate::touch();
     let mut resp = req.into_response(
@@ -71,6 +76,7 @@ fn assemble_config(
         thresholds: submit.thresholds,
         rain_threshold_pct: submit.rain_threshold_pct,
         refresh_minutes: submit.refresh_minutes,
+        awake_minutes: submit.awake_minutes,
         location: siwaj_core::Location {
             name: submit.location_name,
             lat: found.lat,
@@ -135,7 +141,13 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/api/status", Method::Get, |req| {
-        let left = siwaj_core::CONFIG_MODE_IDLE.saturating_sub(crate::idle_for());
+        let window = store
+            .load()
+            .ok()
+            .flatten()
+            .map(|config| config.awake_window())
+            .unwrap_or(siwaj_core::CONFIG_MODE_IDLE);
+        let left = window.saturating_sub(crate::idle_for());
         write_json(
             req,
             &siwaj_core::DeviceStatus {
@@ -226,12 +238,26 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         Ok(())
     })?;
 
-    #[cfg(esp32)]
+    Ok(server)
+}
+
+/// The panel keeps its image while the device sleeps, and the bench controls
+/// are wired to the board, so neither belongs on the server config mode drops.
+/// This one comes up once and stays up for the life of the emulated device.
+#[cfg(esp32)]
+pub fn start_panel() -> Result<EspHttpServer<'static>, anyhow::Error> {
+    let mut server = EspHttpServer::new(&Configuration {
+        stack_size: 12288,
+        max_uri_handlers: 8,
+        http_port: PANEL_PORT,
+        // httpd binds a control socket per server; leaving this at the default
+        // makes the second one collide with the first and refuse to start
+        ctrl_port: 32769,
+        ..Default::default()
+    })?;
+
     server.fn_handler::<AnyError, _>("/api/frame", Method::Get, serve_frame)?;
 
-    // Bench controls for what QEMU cannot emulate. Emulator-only: the device
-    // must never take a sense reading from the network.
-    #[cfg(esp32)]
     server.fn_handler::<AnyError, _>("/api/sim", Method::Post, |mut req| {
         let len = req.content_len().unwrap_or(0) as usize;
         if len == 0 || len > 256 {
@@ -251,12 +277,11 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         };
         crate::frame::set_charging(inputs.charging);
         log::info!("sim: charging={}", inputs.charging);
-        serve_json(req, &inputs)
+        write_json(req, &inputs)
     })?;
 
-    #[cfg(esp32)]
     server.fn_handler::<AnyError, _>("/api/sim", Method::Get, |req| {
-        serve_json(
+        write_json(
             req,
             &crate::frame::SimInputs {
                 charging: crate::frame::charging(),

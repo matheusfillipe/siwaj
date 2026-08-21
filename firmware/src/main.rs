@@ -188,6 +188,8 @@ fn run_config_mode(
     }
     #[cfg(esp32)]
     frame::spawn_loop(store, secrets_store);
+    #[cfg(esp32)]
+    core::mem::forget(server::start_panel()?);
     core::mem::forget(net);
 
     #[cfg(esp32s3)]
@@ -251,7 +253,9 @@ fn serve_until_idle(
     touch();
     #[cfg(esp32)]
     frame::set_serving(true);
-    while idle_for() < siwaj_core::CONFIG_MODE_IDLE {
+    // read per tick, not once: a window saved during this session has to take
+    // effect now, or the countdown the page shows disagrees with the loop
+    while idle_for() < awake_window(store) {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     drop(server);
@@ -259,7 +263,7 @@ fn serve_until_idle(
     frame::set_serving(false);
     log::info!(
         "config mode idle for {}s; stopping the server",
-        siwaj_core::CONFIG_MODE_IDLE.as_secs()
+        awake_window(store).as_secs()
     );
     Ok(())
 }
@@ -343,6 +347,17 @@ pub(crate) fn weather_view(
 /// lets the radio go quiet; the page keeps the window open while someone is
 /// editing by refetching its config as they work.
 static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// A device with no readable config still has to close its window, so the
+/// contract default stands in until there is a stored answer.
+fn awake_window(store: &store::Store) -> std::time::Duration {
+    store
+        .load()
+        .ok()
+        .flatten()
+        .map(|config| config.awake_window())
+        .unwrap_or(siwaj_core::CONFIG_MODE_IDLE)
+}
 
 pub(crate) fn touch() {
     *LAST_REQUEST.lock().expect("activity lock") = Some(std::time::Instant::now());

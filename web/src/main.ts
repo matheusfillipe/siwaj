@@ -12,6 +12,7 @@ interface Elements {
   city: HTMLInputElement;
   located: HTMLElement;
   rain: HTMLInputElement;
+  awakeWindow: HTMLSelectElement;
   refresh: HTMLSelectElement;
   save: HTMLButtonElement;
   rainOut: HTMLOutputElement;
@@ -34,6 +35,7 @@ function elements(): Elements {
     city: document.getElementById("city") as HTMLInputElement,
     located: document.getElementById("located") as HTMLElement,
     rain: document.getElementById("rain") as HTMLInputElement,
+    awakeWindow: document.getElementById("awakeWindow") as HTMLSelectElement,
     refresh: document.getElementById("refresh") as HTMLSelectElement,
     save: document.getElementById("save") as HTMLButtonElement,
     rainOut: document.getElementById("rainOut") as HTMLOutputElement,
@@ -73,18 +75,34 @@ function keepAwake(): void {
  * network, or died, so the page reports only what it knows.
  */
 function watchAwake(el: Elements): void {
-  const tick = async (): Promise<void> => {
-    const status = await fetchStatus();
-    if (status === null) {
+  let remaining: number | null = null;
+
+  const paint = (): void => {
+    if (remaining === null) {
       el.awake.textContent = "Unreachable. If it went to sleep, hold the button.";
       el.awake.classList.add("unreachable");
       return;
     }
-    el.awake.textContent = `Awake for ${clock(status.secondsUntilSleep)}`;
+    el.awake.textContent = `Awake for ${clock(remaining)}`;
     el.awake.classList.remove("unreachable");
   };
-  void tick();
-  window.setInterval(() => void tick(), 5000);
+
+  const poll = async (): Promise<void> => {
+    const status = await fetchStatus();
+    remaining = status === null ? null : status.secondsUntilSleep;
+    paint();
+  };
+
+  // the device owns the number; counting between polls only keeps the display
+  // honest about the seconds it already reported
+  window.setInterval(() => {
+    if (remaining !== null && remaining > 0) {
+      remaining -= 1;
+      paint();
+    }
+  }, 1000);
+  window.setInterval(() => void poll(), 5000);
+  void poll();
 }
 
 function setStatus(el: Elements, message: string, isError = false): void {
@@ -104,6 +122,7 @@ function fillForm(el: Elements, bands: BandPicker, config: Config): void {
   showLocated(el, config.location);
   bands.set(config.thresholds);
   el.rain.value = String(config.rainThresholdPct);
+  el.awakeWindow.value = String(config.awakeMinutes);
   el.refresh.value = String(config.refreshMinutes);
   updateRain(el);
 }
@@ -117,6 +136,7 @@ function readForm(el: Elements, bands: BandPicker): ConfigSubmit {
     thresholds: bands.values(),
     rainThresholdPct: Number(el.rain.value),
     refreshMinutes: Number(el.refresh.value),
+    awakeMinutes: Number(el.awakeWindow.value),
     locationName: el.city.value.trim(),
   };
 }
@@ -136,6 +156,7 @@ async function sync(el: Elements, bands: BandPicker): Promise<void> {
       thresholds: client.config.thresholds,
       rainThresholdPct: client.config.rainThresholdPct,
       refreshMinutes: client.config.refreshMinutes,
+      awakeMinutes: client.config.awakeMinutes,
       locationName: client.config.location.name,
     });
     saveClientState({ revision: saved.revision, config: saved });

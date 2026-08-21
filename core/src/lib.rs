@@ -12,7 +12,7 @@ use ts_rs::TS;
 pub mod render;
 pub mod weather;
 
-pub const CONFIG_SCHEMA_VERSION: u16 = 2;
+pub const CONFIG_SCHEMA_VERSION: u16 = 3;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
 pub const RAIN_THRESHOLD_PCT_DEFAULT: u8 = 30;
 
@@ -58,6 +58,9 @@ pub struct Config {
     pub thresholds: Thresholds,
     pub rain_threshold_pct: u8,
     pub refresh_minutes: u16,
+    /// How long the config page stays served after the last request. Short
+    /// values are what make the sleep path testable without a ten minute wait.
+    pub awake_minutes: u16,
     pub location: Location,
 }
 
@@ -68,6 +71,7 @@ pub struct ConfigSubmit {
     pub thresholds: Thresholds,
     pub rain_threshold_pct: u8,
     pub refresh_minutes: u16,
+    pub awake_minutes: u16,
     pub location_name: String,
 }
 
@@ -90,10 +94,16 @@ pub struct WeatherProbe {
     pub timezone_offset_secs: i32,
 }
 
-/// How long config mode keeps serving after the last request. Long enough to
-/// finish a setup, short enough that a stray button press does not hold the
-/// radio on until the battery is flat.
-pub const CONFIG_MODE_IDLE: core::time::Duration = core::time::Duration::from_secs(10 * 60);
+/// How long config mode keeps serving after the last request, when there is
+/// no stored config to say otherwise. Long enough to finish a setup, short
+/// enough that a stray button press does not hold the radio on until the
+/// battery is flat.
+pub const AWAKE_MINUTES_DEFAULT: u16 = 10;
+const AWAKE_MINUTES_MIN: u16 = 1;
+const AWAKE_MINUTES_MAX: u16 = 60;
+
+pub const CONFIG_MODE_IDLE: core::time::Duration =
+    core::time::Duration::from_secs(AWAKE_MINUTES_DEFAULT as u64 * 60);
 
 /// What the config page needs to say whether the device is about to drop off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -153,6 +163,7 @@ pub enum ConfigError {
     ThresholdRange,
     RainThreshold,
     RefreshWindow,
+    AwakeWindow,
     Latitude,
     Longitude,
     SchemaVersion,
@@ -170,6 +181,10 @@ impl fmt::Display for ConfigError {
             ),
             ConfigError::RainThreshold => write!(f, "rain threshold must be 0..=100"),
             ConfigError::RefreshWindow => write!(f, "refresh minutes must be 5..=240"),
+            ConfigError::AwakeWindow => write!(
+                f,
+                "awake minutes must be {AWAKE_MINUTES_MIN}..={AWAKE_MINUTES_MAX}"
+            ),
             ConfigError::Latitude => write!(f, "latitude must be -90..=90"),
             ConfigError::Longitude => write!(f, "longitude must be -180..=180"),
             ConfigError::SchemaVersion => write!(f, "missing or invalid schemaVersion"),
@@ -189,6 +204,10 @@ pub const OFFLINE_RETRY: core::time::Duration = core::time::Duration::from_secs(
 impl Config {
     pub fn refresh_interval(&self) -> core::time::Duration {
         core::time::Duration::from_secs(self.refresh_minutes as u64 * 60)
+    }
+
+    pub fn awake_window(&self) -> core::time::Duration {
+        core::time::Duration::from_secs(self.awake_minutes as u64 * 60)
     }
 
     pub fn next_fetch_delay(&self, last_was_live: bool) -> core::time::Duration {
@@ -213,6 +232,9 @@ impl Config {
         if !(REFRESH_MINUTES_MIN..=REFRESH_MINUTES_MAX).contains(&self.refresh_minutes) {
             return Err(ConfigError::RefreshWindow);
         }
+        if !(AWAKE_MINUTES_MIN..=AWAKE_MINUTES_MAX).contains(&self.awake_minutes) {
+            return Err(ConfigError::AwakeWindow);
+        }
         if !(-90.0..=90.0).contains(&self.location.lat) {
             return Err(ConfigError::Latitude);
         }
@@ -236,6 +258,7 @@ impl Config {
             },
             rain_threshold_pct: RAIN_THRESHOLD_PCT_DEFAULT,
             refresh_minutes: REFRESH_MINUTES_DEFAULT,
+            awake_minutes: AWAKE_MINUTES_DEFAULT,
             location: Location {
                 name: "Example City".to_string(),
                 lat: 52.52,

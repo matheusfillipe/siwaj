@@ -38,6 +38,8 @@ RUN_DIR = REPO_ROOT / "firmware" / "target-esp32" / "qemu-dev"
 
 SERIAL_TCP_PORT = int(os.environ.get("SIWAJ_SERIAL_PORT", "47653"))
 HTTP_PORT = int(os.environ.get("SIWAJ_HTTP_PORT", "47652"))
+# the panel mirror answers here, and keeps answering while config mode is down
+PANEL_PORT = int(os.environ.get("SIWAJ_PANEL_PORT", "47654"))
 
 
 PARTITION_TABLE_OFFSET = 0x8000
@@ -107,7 +109,8 @@ def base_cmd(image: Path, machine: str, http_port: int, serial_args: list[str]) 
         "-machine",
         machine,
         "-nic",
-        f"user,model=open_eth,hostfwd=tcp:127.0.0.1:{http_port}-:80",
+        f"user,model=open_eth,hostfwd=tcp:127.0.0.1:{http_port}-:80"
+        f",hostfwd=tcp:127.0.0.1:{PANEL_PORT}-:81",
         "-drive",
         f"file={image},if=mtd,format=raw",
         *serial_args,
@@ -227,6 +230,7 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
             print(f"qemu dev device up (pid {proc.pid})")
             print(f"  web ui  : http://127.0.0.1:{HTTP_PORT}")
             print(f"  serial  : socket://127.0.0.1:{SERIAL_TCP_PORT} (make qemu-provision)")
+            print(f"  panel   : http://127.0.0.1:{PANEL_PORT} (make qemu-display)")
             print(f"  state   : {state}")
             print(f"  log     : {log_file}")
             print("  stop    : make qemu-stop")
@@ -245,7 +249,7 @@ def sim(charging: bool) -> int:
     """Drive the emulator's stand-in sense lines over its bench endpoint."""
     body = json.dumps({"charging": charging}).encode()
     request = urllib.request.Request(
-        f"http://127.0.0.1:{HTTP_PORT}/api/sim",
+        f"http://127.0.0.1:{PANEL_PORT}/api/sim",
         data=body,
         method="POST",
         headers={"content-type": "application/json"},
