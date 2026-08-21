@@ -18,15 +18,13 @@ static LAST: Mutex<Option<Frame>> = Mutex::new(None);
 /// Stands in for the charger sense the emulator has no hardware for, so the
 /// charging frame can be exercised without a bench supply.
 static CHARGING: AtomicBool = AtomicBool::new(false);
-/// Set when a simulated input changes, so the display follows the switch
-/// instead of waiting out the refresh interval.
-static RESTALE: AtomicBool = AtomicBool::new(false);
+static REDRAW_PENDING: AtomicBool = AtomicBool::new(false);
 
 const POLL: Duration = Duration::from_secs(1);
 
 pub fn set_charging(on: bool) {
     CHARGING.store(on, Ordering::Relaxed);
-    RESTALE.store(true, Ordering::Relaxed);
+    REDRAW_PENDING.store(true, Ordering::Relaxed);
 }
 
 pub fn charging() -> bool {
@@ -54,7 +52,7 @@ pub fn spawn_loop(store: &'static Store, secrets: &'static Secrets) {
             loop {
                 match store.load() {
                     Ok(Some(config)) => {
-                        let switched = RESTALE.swap(false, Ordering::Relaxed);
+                        let switched = REDRAW_PENDING.swap(false, Ordering::Relaxed);
                         if due(rendered, &config) {
                             let view = crate::weather_view(
                                 secrets,

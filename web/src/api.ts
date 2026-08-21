@@ -5,8 +5,7 @@ import type { DeviceStatus } from "./generated/DeviceStatus";
 
 export type ServerState = ConfigState;
 
-/// Null means the device stopped answering, which in config mode means it
-/// went back to sleep rather than that anything failed.
+/** Null means the device stopped answering, for any of several reasons. */
 export async function fetchStatus(): Promise<DeviceStatus | null> {
   try {
     const res = await fetch("/api/status");

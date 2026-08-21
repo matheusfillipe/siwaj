@@ -1,6 +1,8 @@
 import type { Config } from "./generated/Config";
 
-const KEY = "siwaj.config.v1";
+/** Carries the schema version, so a payload from an older shape is ignored
+ * instead of being pushed at a device that no longer speaks it. */
+const KEY = "siwaj.config.v2";
 
 export interface ClientState {
   revision: number;

@@ -7,6 +7,7 @@ serve: boot detached; HTTP forwarded to 127.0.0.1:<http_port>, serial
 
 import argparse
 import contextlib
+import json
 import os
 import queue
 import shutil
@@ -16,8 +17,14 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import TextIO
+
+import serial
+
+from siwaj.provision import BAUD, send
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 QEMU_CANDIDATES = [
@@ -88,7 +95,7 @@ def resolve_qemu() -> str | None:
     return shutil.which(QEMU_SYSTEM_XTENSA)
 
 
-def base_cmd(image: Path, machine: str, http_port: int, serial: list[str]) -> list[str]:
+def base_cmd(image: Path, machine: str, http_port: int, serial_args: list[str]) -> list[str]:
     qemu = resolve_qemu()
     if qemu is None:
         raise RuntimeError(
@@ -103,7 +110,7 @@ def base_cmd(image: Path, machine: str, http_port: int, serial: list[str]) -> li
         f"user,model=open_eth,hostfwd=tcp:127.0.0.1:{http_port}-:80",
         "-drive",
         f"file={image},if=mtd,format=raw",
-        *serial,
+        *serial_args,
         "-display",
         "none",
     ]
@@ -165,9 +172,6 @@ def smoke(image: Path, machine: str, expect: str, timeout: float) -> int:
 
 
 def http_up(http_port: int) -> bool:
-    import urllib.error
-    import urllib.request
-
     # /api/status is the one endpoint that does not count as activity, so
     # polling for liveness cannot itself hold config mode open
     try:
@@ -239,10 +243,6 @@ def serve(image: Path, machine: str, expect: str, timeout: float) -> int:
 
 def sim(charging: bool) -> int:
     """Drive the emulator's stand-in sense lines over its bench endpoint."""
-    import json
-    import urllib.error
-    import urllib.request
-
     body = json.dumps({"charging": charging}).encode()
     request = urllib.request.Request(
         f"http://127.0.0.1:{HTTP_PORT}/api/sim",
@@ -260,26 +260,17 @@ def sim(charging: bool) -> int:
 
 
 def serial_command(command: str) -> int:
-    """Speaks the device's serial REPL, which answers whether or not the HTTP
-    server is up. That is what makes it the only way to wake a device that
-    has stopped serving."""
-    import serial
-
+    """The serial REPL answers whether or not the HTTP server is up, which is
+    what makes it the channel that can wake a device that stopped serving."""
     try:
-        conn = serial.serial_for_url(f"socket://127.0.0.1:{SERIAL_TCP_PORT}", 115200, timeout=1)
+        conn = serial.serial_for_url(f"socket://127.0.0.1:{SERIAL_TCP_PORT}", BAUD, timeout=1)
     except (serial.SerialException, OSError) as err:
         print(f"serial: {err}; is `make qemu-run` up?", file=sys.stderr)
         return 1
     try:
         conn.reset_input_buffer()
-        conn.write(f"{command}\n".encode())
-        deadline = time.monotonic() + 10.0
-        reply = ""
-        while time.monotonic() < deadline:
-            reply += conn.read_until(b"\n").decode(errors="replace")
-            if "OK" in reply or "ERR" in reply:
-                break
-        print(f"{command}: {reply.strip() or 'no reply'}")
+        reply = send(conn, command)
+        print(f"{command}: {reply or 'no reply'}")
         return 0 if "OK" in reply else 1
     finally:
         conn.close()

@@ -16,6 +16,13 @@ pub const CONFIG_SCHEMA_VERSION: u16 = 2;
 pub const REFRESH_MINUTES_DEFAULT: u16 = 30;
 pub const RAIN_THRESHOLD_PCT_DEFAULT: u8 = 30;
 
+/// The range the thresholds may occupy. These are the points where a garment
+/// starts being needed, not the temperatures a place can reach, so the window
+/// is narrower than any real climate. The config page draws its axis to the
+/// same bounds, and this check is what keeps the two from drifting.
+pub const THRESHOLD_MIN_C: f32 = -10.0;
+pub const THRESHOLD_MAX_C: f32 = 30.0;
+
 const REFRESH_MINUTES_MIN: u16 = 5;
 const REFRESH_MINUTES_MAX: u16 = 240;
 const MINUTELY_RAIN_MM_THRESHOLD: f32 = 0.1;
@@ -34,10 +41,8 @@ pub struct Location {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
-/// Two edges cutting the feels-like axis into the three garments. Below
-/// `low_c` is a jacket, below `high_c` a pullover, above it a shirt.
 pub struct Thresholds {
     pub low_c: f32,
     pub high_c: f32,
@@ -57,7 +62,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct ConfigSubmit {
     pub thresholds: Thresholds,
@@ -154,6 +159,7 @@ impl RainOutlook {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
     ThresholdOrder,
+    ThresholdRange,
     RainThreshold,
     RefreshWindow,
     Latitude,
@@ -167,6 +173,10 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConfigError::ThresholdOrder => write!(f, "thresholds must satisfy low < high"),
+            ConfigError::ThresholdRange => write!(
+                f,
+                "thresholds must be within {THRESHOLD_MIN_C}..={THRESHOLD_MAX_C} C"
+            ),
             ConfigError::RainThreshold => write!(f, "rain threshold must be 0..=100"),
             ConfigError::RefreshWindow => write!(f, "refresh minutes must be 5..=240"),
             ConfigError::Latitude => write!(f, "latitude must be -90..=90"),
@@ -201,6 +211,10 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.thresholds.low_c >= self.thresholds.high_c {
             return Err(ConfigError::ThresholdOrder);
+        }
+        let within = |c: f32| (THRESHOLD_MIN_C..=THRESHOLD_MAX_C).contains(&c);
+        if !within(self.thresholds.low_c) || !within(self.thresholds.high_c) {
+            return Err(ConfigError::ThresholdRange);
         }
         if self.rain_threshold_pct > 100 {
             return Err(ConfigError::RainThreshold);
@@ -333,6 +347,36 @@ mod tests {
     }
 
     #[test]
+    fn validate_rejects_thresholds_outside_the_axis() {
+        let mut c = valid();
+        c.thresholds = Thresholds {
+            low_c: THRESHOLD_MIN_C - 0.5,
+            high_c: 10.0,
+        };
+        assert_eq!(c.validate(), Err(ConfigError::ThresholdRange));
+
+        let mut c = valid();
+        c.thresholds = Thresholds {
+            low_c: 10.0,
+            high_c: THRESHOLD_MAX_C + 0.5,
+        };
+        assert_eq!(c.validate(), Err(ConfigError::ThresholdRange));
+    }
+
+    #[test]
+    fn a_submit_carrying_a_foreign_field_is_refused() {
+        // the four-garment page sent midC; taking the fields that happen to
+        // line up would silently redefine what highC means
+        let stale = json!({
+            "thresholds": {"lowC": 8.0, "midC": 15.0, "highC": 21.0},
+            "rainThresholdPct": 30,
+            "refreshMinutes": 30,
+            "locationName": "Berlin",
+        });
+        assert!(serde_json::from_value::<ConfigSubmit>(stale).is_err());
+    }
+
+    #[test]
     fn validate_rejects_out_of_range_fields() {
         let mut c = valid();
         c.rain_threshold_pct = 101;
@@ -387,9 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn the_four_garment_schema_is_not_readable() {
-        // dropping the t-shirt changed the shape rather than extending it, so
-        // a device holding the old config re-runs setup instead of migrating
+    fn migrate_rejects_an_older_schema() {
         let old = json!({
             "schemaVersion": 1,
             "revision": 4,

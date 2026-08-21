@@ -49,8 +49,25 @@ function clock(seconds: number): string {
   return `${mins}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/// Losing the device looks the same from here whether it slept, dropped off
-/// the network, or died, so the page reports only what it knows.
+/**
+ * Editing sends nothing on its own, so a long setup would run the device's
+ * idle window down and lose the save. Reading the config counts as a request,
+ * which is enough to hold the window open while someone is working.
+ */
+const KEEPALIVE_MS = 60_000;
+let lastKeepAlive = 0;
+
+function keepAwake(): void {
+  const now = Date.now();
+  if (now - lastKeepAlive < KEEPALIVE_MS) return;
+  lastKeepAlive = now;
+  void fetchState().catch(() => undefined);
+}
+
+/**
+ * Losing the device looks the same from here whether it slept, dropped off the
+ * network, or died, so the page reports only what it knows.
+ */
 function watchAwake(el: Elements): void {
   const tick = async (): Promise<void> => {
     const status = await fetchStatus();
@@ -71,8 +88,7 @@ function setStatus(el: Elements, message: string, isError = false): void {
   el.status.classList.toggle("error", isError);
 }
 
-/// Names are ambiguous and geocoding picks the first hit, so the page shows
-/// what the device actually resolved to rather than echoing what was typed.
+/** Geocoding picks the first hit, so the page shows where that landed. */
 function showLocated(el: Elements, location: Config["location"]): void {
   const place = [location.name, location.region, location.country].filter(Boolean).join(", ");
   const fix = `${location.lat.toFixed(3)}, ${location.lon.toFixed(3)}`;
@@ -152,10 +168,13 @@ function main(): void {
       high: el.handleHigh,
       ranges: [el.bandJacket, el.bandPullover, el.bandShirt],
     },
-    () => setStatus(el, ""),
+    () => {
+      setStatus(el, "");
+      keepAwake();
+    },
   );
-  bands.set({ lowC: 8, highC: 18 });
   el.rain.addEventListener("input", () => updateRain(el));
+  el.form.addEventListener("input", () => keepAwake());
   el.form.addEventListener("submit", (event) => void onSave(el, bands, event));
   watchAwake(el);
   sync(el, bands).catch((err: unknown) => {

@@ -188,15 +188,19 @@ def main() -> int:
             )
 
         print("e2e: charging indicator")
+        # the simulated battery drains a percent a minute and the level is
+        # drawn as text, so frames are compared for difference, never equality
+        # against one captured earlier
+        _, before_charge, _ = http_bytes("/api/frame")
         status, charged = http_json("POST", "/api/sim", {"charging": True})
         results.append(
             check("POST /api/sim -> 200", status == 200 and charged == {"charging": True})
         )
-        _, plugged, _ = await_change("/api/frame", frame)
-        results.append(check("charging redraws the frame", plugged != frame))
+        _, plugged, _ = await_change("/api/frame", before_charge)
+        results.append(check("charging redraws the frame", plugged != before_charge))
         http_json("POST", "/api/sim", {"charging": False})
         _, unplugged, _ = await_change("/api/frame", plugged)
-        results.append(check("unplugging redraws it back", unplugged == frame))
+        results.append(check("unplugging redraws it again", unplugged != plugged))
 
         print("e2e: config mode sleeps and the button wakes it")
         status, awake = http_json("GET", "/api/status")

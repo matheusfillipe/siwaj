@@ -25,6 +25,19 @@ def load_env(path: Path) -> dict[str, str]:
     return values
 
 
+def send(conn: serial.Serial, command: str, timeout: float = TIMEOUT_SECONDS) -> str:
+    """One exchange with the device's REPL: write a line, read until it answers
+    OK or ERR. Returns the reply, empty when the device stayed silent."""
+    conn.write(f"{command}\n".encode())
+    deadline = time.time() + timeout
+    reply = ""
+    while time.time() < deadline:
+        reply += conn.read_until(b"\n").decode(errors="replace")
+        if "OK" in reply or "ERR" in reply:
+            return reply.strip()
+    return reply.strip()
+
+
 def provision(port: str, env_path: Path) -> int:
     secrets = load_env(env_path)
     if not secrets:
@@ -36,17 +49,12 @@ def provision(port: str, env_path: Path) -> int:
         time.sleep(SETTLE_SECONDS)
         conn.reset_input_buffer()
         for key, value in secrets.items():
-            conn.write(f"set {key} {value}\n".encode())
-            deadline = time.time() + TIMEOUT_SECONDS
-            reply = ""
-            while time.time() < deadline:
-                reply += conn.read_until(b"\n").decode(errors="replace")
-                if "OK" in reply:
-                    print(f"set {key}: ok")
-                    break
-                if "ERR" in reply:
-                    print(f"set {key}: {reply.strip()}", file=sys.stderr)
-                    return 1
+            reply = send(conn, f"set {key} {value}")
+            if "OK" in reply:
+                print(f"set {key}: ok")
+            elif "ERR" in reply:
+                print(f"set {key}: {reply}", file=sys.stderr)
+                return 1
             else:
                 print(f"set {key}: no reply from device", file=sys.stderr)
                 return 1

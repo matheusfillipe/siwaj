@@ -305,9 +305,9 @@ pub(crate) fn weather_view(
     }
 }
 
-/// When config mode last saw a request. The window is idle-based so a long
-/// setup never has the page vanish mid-edit, while an untouched device still
-/// stops serving and lets the radio go quiet.
+/// When config mode last saw a request. An untouched device stops serving and
+/// lets the radio go quiet; the page keeps the window open while someone is
+/// editing by refetching its config as they work.
 static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 pub(crate) fn touch() {

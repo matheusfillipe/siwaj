@@ -1,17 +1,15 @@
-/// Two dividers over one temperature axis, cutting it into the three
-/// garments. Built on pointer events rather than stacked range inputs so the
-/// dividers sit on the band they split and stay grabbable on a touch screen.
+/**
+ * Two dividers over one temperature axis, cutting it into the three garments.
+ * Pointer events rather than stacked range inputs, so each divider sits on the
+ * band it splits and stays grabbable on a touch screen.
+ */
+import type { Thresholds } from "./generated/Thresholds";
 
-export const AXIS_MIN = -10;
-export const AXIS_MAX = 30;
-/// The device rejects thresholds that are not strictly ordered, so the
-/// dividers keep at least one step between them.
-export const STEP = 0.5;
-
-export interface Thresholds {
-  lowC: number;
-  highC: number;
-}
+/** Mirrors `THRESHOLD_MIN_C`/`MAX_C`, which `Config::validate` enforces. */
+const AXIS_MIN = -10;
+const AXIS_MAX = 30;
+/** The device rejects thresholds that are not strictly ordered. */
+const STEP = 0.5;
 
 interface Parts {
   track: HTMLElement;
@@ -42,6 +40,7 @@ export class BandPicker {
     this.bind(parts.low, "lowC");
     this.bind(parts.high, "highC");
     parts.track.addEventListener("pointerdown", (event) => this.grabNearest(event));
+    this.render();
   }
 
   values(): Thresholds {
@@ -78,8 +77,7 @@ export class BandPicker {
     return AXIS_MIN + Math.min(Math.max(ratio, 0), 1) * (AXIS_MAX - AXIS_MIN);
   }
 
-  /// A tap on the track moves whichever divider is closer, so the whole bar
-  /// is a target instead of just the two handles.
+  /** A tap anywhere moves the nearer divider, so the whole bar is a target. */
   private grabNearest(event: PointerEvent): void {
     if (event.target !== this.parts.track && (event.target as HTMLElement).closest(".handle")) {
       return;
@@ -136,6 +134,8 @@ export class BandPicker {
       [this.parts.high, highC],
     ] as const) {
       handle.style.left = `${percent(value)}%`;
+      handle.setAttribute("aria-valuemin", String(AXIS_MIN));
+      handle.setAttribute("aria-valuemax", String(AXIS_MAX));
       handle.setAttribute("aria-valuenow", String(value));
       handle.setAttribute("aria-valuetext", degrees(value));
     }

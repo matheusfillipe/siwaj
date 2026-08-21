@@ -14,6 +14,7 @@ static APP_GZ: &[u8] = include_bytes!("../../web/dist/app.js.gz");
 type AnyError = anyhow::Error;
 
 fn serve_gz(req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>, body: &[u8], ctype: &str) -> Result<(), AnyError> {
+    crate::touch();
     let mut resp = req.into_response(
         200,
         Some("OK"),
@@ -29,6 +30,16 @@ fn serve_gz(req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
 }
 
 fn serve_json(
+    req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
+    payload: &impl serde::Serialize,
+) -> Result<(), AnyError> {
+    crate::touch();
+    write_json(req, payload)
+}
+
+/// Answers without counting as activity, which only the countdown itself
+/// needs: a page watching the clock must not be what stops it running down.
+fn write_json(
     req: Request<&mut esp_idf_svc::http::server::EspHttpConnection<'_>>,
     payload: &impl serde::Serialize,
 ) -> Result<(), AnyError> {
@@ -104,6 +115,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/", Method::Get, |req| {
+        crate::touch();
         let mut resp = req.into_response(
             200,
             Some("OK"),
@@ -122,11 +134,9 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         serve_gz(req, APP_GZ, "text/javascript")
     })?;
 
-    // Deliberately does not count as activity: an open page polls this, and
-    // watching the countdown must not be what stops it reaching zero.
     server.fn_handler::<AnyError, _>("/api/status", Method::Get, |req| {
         let left = siwaj_core::CONFIG_MODE_IDLE.saturating_sub(crate::idle_for());
-        serve_json(
+        write_json(
             req,
             &siwaj_core::DeviceStatus {
                 seconds_until_sleep: left.as_secs() as u32,
@@ -135,7 +145,6 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/api/config", Method::Get, |req| {
-        crate::touch();
         let config = match store.load() {
             Ok(config) => config,
             Err(e) => {
@@ -152,7 +161,6 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     })?;
 
     server.fn_handler::<AnyError, _>("/api/config", Method::Post, |mut req| {
-        crate::touch();
         let len = req.content_len().unwrap_or(0) as usize;
         if len == 0 || len > 2048 {
             let mut resp = req.into_status_response(400)?;
