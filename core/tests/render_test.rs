@@ -53,7 +53,7 @@ fn cases() -> Vec<(&'static str, View)> {
         ),
         ("battery_unknown", battery_unknown),
         ("serving", {
-            let mut serving = view(Garment::from_feels_like(11.0, &t), rain(10, false), 11.0);
+            let mut serving = View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41), false);
             serving.serving = true;
             serving
         }),

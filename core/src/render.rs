@@ -520,7 +520,11 @@ pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     if view.serving {
         draw_serving(d).ok();
     }
-    if view.offline {
+    if view.serving {
+        // during setup there is no weather yet and nothing is wrong; saying
+        // "offline" would read as a fault to someone on their first run
+        centered_small(d, WIDTH as i32 / 2, 108, "setup").ok();
+    } else if view.offline {
         centered_small(d, WIDTH as i32 / 2, 108, "offline").ok();
     } else {
         let rounded = view.feels_like_c.round() as i32;

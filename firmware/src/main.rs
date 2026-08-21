@@ -171,14 +171,23 @@ fn run_config_mode(
         spi2,
         adc1,
     } = hardware;
+    // Past this point the radio is on, so nothing may return early: an error
+    // that escapes here would abort into a reboot with wifi still up, and a
+    // device that keeps rebooting into setup empties the battery in a day.
     #[cfg(esp32s3)]
-    let net = net::bring_up(
+    let net = match net::bring_up(
         modem,
         sys_loop,
         secrets_store.get(secrets::SecretKey::WifiSsid),
         secrets_store.get(secrets::SecretKey::WifiPass),
         nvs_partition,
-    )?;
+    ) {
+        Ok(net) => net,
+        Err(e) => {
+            log::error!("config mode: wifi bring-up failed: {e}");
+            deep_sleep(WAKE_INTERVAL);
+        }
+    };
     #[cfg(esp32)]
     let net = net::bring_up(mac, sys_loop)?;
 
@@ -197,38 +206,54 @@ fn run_config_mode(
         // The panel holds whatever it was last given, so setup mode paints
         // the mark on the way in and paints it away on the way out. The board
         // stays up across the session and only sleeps once, at the end.
-        let mut board = board::Board::new(pins, spi2, adc1)?;
-        let mut setup = siwaj_core::render::View::offline(
-            siwaj_core::render::TimeOfDay::from_unix(now_unix()),
-            board.battery.pct(),
-            board.battery.charging(),
-        );
-        setup.serving = true;
-        board.draw(&setup)?;
+        let mut board = match board::Board::new(pins, spi2, adc1) {
+            Ok(board) => Some(board),
+            Err(e) => {
+                // the page is the point of setup mode; losing the panel is
+                // worth reporting but not worth refusing to serve over
+                log::error!("config mode: panel unavailable: {e}");
+                None
+            }
+        };
+        if let Some(board) = board.as_mut() {
+            let mut setup = siwaj_core::render::View::offline(
+                siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+                board.battery.pct(),
+                board.battery.charging(),
+            );
+            setup.serving = true;
+            if let Err(e) = board.draw(&setup) {
+                log::error!("config mode: setup frame failed: {e}");
+            }
+        }
 
-        serve_until_idle(store, secrets_store)?;
+        if let Err(e) = serve_until_idle(store, secrets_store) {
+            log::error!("config mode: server failed: {e}");
+        }
 
         // Leaving setup repaints before the radio goes off: the weather the
         // device now has if it was configured, the plain offline face if the
         // setup was abandoned. Either way the mark goes with it.
         let config = store.load().ok().flatten();
-        let leaving = match config.as_ref() {
-            Some(config) => weather_view(
-                secrets_store,
-                config,
-                board.battery.pct(),
-                board.battery.charging(),
-            ),
-            None => siwaj_core::render::View::offline(
-                siwaj_core::render::TimeOfDay::from_unix(now_unix()),
-                board.battery.pct(),
-                board.battery.charging(),
-            ),
-        };
-        if let Err(e) = board.draw(&leaving) {
-            log::error!("leaving setup: panel repaint failed: {e}");
+        if let Some(board) = board.as_mut() {
+            let leaving = match config.as_ref() {
+                Some(config) => weather_view(
+                    secrets_store,
+                    config,
+                    board.battery.pct(),
+                    board.battery.charging(),
+                ),
+                None => siwaj_core::render::View::offline(
+                    siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+                    board.battery.pct(),
+                    board.battery.charging(),
+                ),
+            };
+            if let Err(e) = board.draw(&leaving) {
+                log::error!("leaving setup: panel repaint failed: {e}");
+            }
+            board.power_down();
         }
-        board.power_down();
         let refresh = config
             .as_ref()
             .map(siwaj_core::Config::refresh_interval)
