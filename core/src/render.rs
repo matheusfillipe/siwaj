@@ -15,6 +15,11 @@ pub const WIDTH: u32 = 200;
 pub const HEIGHT: u32 = 200;
 pub const FRAME_BYTES: usize = (WIDTH * HEIGHT / 8) as usize;
 
+/// The bottom row: the clock's ink sits between these lines, and the rain
+/// badge and battery are placed against them so the row reads level.
+const ROW_TOP: i32 = 164;
+const ROW_BASELINE: i32 = 176;
+
 const ON: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 1);
 const FILL: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_fill(BinaryColor::On);
 const SLEEVE: PrimitiveStyle<BinaryColor> = PrimitiveStyle::with_stroke(BinaryColor::On, 9);
@@ -300,21 +305,29 @@ const PATTERNS: [&[u8]; 12] = [
     &[0b111, 0b101, 0b111, 0b101, 0b111],
     &[0b111, 0b101, 0b111, 0b001, 0b111],
     &[0b000, 0b000, 0b111, 0b000, 0b000],
-    &[0b11, 0b11],
+    &[0b111, 0b101, 0b111],
 ];
+
+const DEGREE: char = '\u{00b0}';
 
 /// Glyph lookup for the big custom font; None for unsupported characters.
 fn glyph(ch: char) -> Option<&'static [u8]> {
     match ch {
         '0'..='9' => Some(PATTERNS[ch as usize - '0' as usize]),
         '-' => Some(PATTERNS[10]),
-        '\u{00b0}' => Some(PATTERNS[11]),
+        DEGREE => Some(PATTERNS[11]),
         _ => None,
     }
 }
 
 /// Column count comes from the pattern itself (longest row in bits), so the
 /// degree sign's narrow glyph stays a data property instead of a special case.
+/// The degree ring is drawn on a finer grid than the digits, so it keeps the
+/// block font's look while staying a mark beside the number.
+fn glyph_cell(ch: char, cell: i32) -> i32 {
+    if ch == DEGREE { cell * 2 / 3 } else { cell }
+}
+
 fn glyph_cols(ch: char) -> usize {
     glyph(ch).map_or(3, |pattern| {
         pattern
@@ -337,19 +350,20 @@ fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
             continue;
         };
         let pattern_cols = glyph_cols(ch) as i32;
+        let unit = glyph_cell(ch, cell);
         for (ry, row) in pattern.iter().enumerate() {
             for rx in 0..pattern_cols {
                 if (row >> (pattern_cols - 1 - rx)) & 1 == 1 {
-                    let top_left = Point::new(x + rx * cell, origin.y + ry as i32 * cell);
+                    let top_left = Point::new(x + rx * unit, origin.y + ry as i32 * unit);
                     let rect = Rectangle::with_corners(
                         top_left,
-                        top_left + Size::new(cell as u32 - 1, cell as u32 - 1),
+                        top_left + Size::new(unit as u32 - 1, unit as u32 - 1),
                     );
                     rect.into_styled(FILL).draw(d)?;
                 }
             }
         }
-        x += pattern_cols * cell + cell;
+        x += pattern_cols * unit + cell;
     }
     Ok(())
 }
@@ -357,7 +371,7 @@ fn draw_big_text<D: DrawTarget<Color = BinaryColor>>(
 fn big_text_width(text: &str, cell: i32) -> i32 {
     let mut w = 0;
     for ch in text.chars().filter(|ch| glyph(*ch).is_some()) {
-        w += glyph_cols(ch) as i32 * cell + cell;
+        w += glyph_cols(ch) as i32 * glyph_cell(ch, cell) + cell;
     }
     w - cell
 }
@@ -374,24 +388,30 @@ fn centered_small<D: DrawTarget<Color = BinaryColor>>(
     Text::new(text, Point::new(x, y), style).draw(d).map(|_| ())
 }
 
+/// The badge holds the cloud above the streaks inside the row's band, so it
+/// sits level with the clock whether or not there is rain to draw. Letting the
+/// streaks decide the height would float the cloud on a dry day.
 fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     view: &View,
 ) -> Result<(), D::Error> {
-    let (bx, by) = (8, 156);
-    Circle::new(Point::new(bx + 6, by + 6), 6)
+    let bx = 8;
+    Circle::new(Point::new(bx + 4, ROW_TOP + 2), 6)
         .into_styled(FILL)
         .draw(d)?;
-    Circle::new(Point::new(bx + 14, by + 3), 7)
+    Circle::new(Point::new(bx + 11, ROW_TOP), 8)
         .into_styled(FILL)
         .draw(d)?;
-    Rectangle::with_corners(Point::new(bx + 1, by + 6), Point::new(bx + 21, by + 13))
-        .into_styled(FILL)
-        .draw(d)?;
+    Rectangle::with_corners(
+        Point::new(bx + 1, ROW_TOP + 4),
+        Point::new(bx + 20, ROW_TOP + 8),
+    )
+    .into_styled(FILL)
+    .draw(d)?;
     if view.rain.is_risk(view.rain_threshold_pct) {
         for i in 0..3 {
-            let x = bx + 3 + i * 7;
-            Line::new(Point::new(x, by + 18), Point::new(x - 3, by + 24))
+            let x = bx + 4 + i * 7;
+            Line::new(Point::new(x, ROW_TOP + 9), Point::new(x - 2, ROW_BASELINE))
                 .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 2))
                 .draw(d)?;
         }
@@ -399,7 +419,7 @@ fn draw_rain_badge<D: DrawTarget<Color = BinaryColor>>(
     let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     Text::new(
         &format!("{}%", view.rain.pop_pct_next_hour),
-        Point::new(bx + 26, by + 20),
+        Point::new(bx + 26, ROW_BASELINE),
         style,
     )
     .draw(d)
@@ -411,11 +431,11 @@ fn draw_battery<D: DrawTarget<Color = BinaryColor>>(
     pct: Option<u8>,
     charging: bool,
 ) -> Result<(), D::Error> {
-    let (bx, by) = (160, 162);
+    let (bx, by) = (160, ROW_TOP);
     if charging {
         // bolt to the left of the cell, outside it, so it stays readable at
         // any charge level instead of vanishing into the fill
-        let (lx, ly) = (bx - 14, by);
+        let (lx, ly) = (bx - 14, by - 1);
         Triangle::new(
             Point::new(lx + 6, ly),
             Point::new(lx + 9, ly),
@@ -459,7 +479,7 @@ fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
     let text = format!("{:02}:{:02}", updated.hour, updated.minute);
     let bb = Text::new(&text, Point::zero(), style).bounding_box();
     let x = WIDTH as i32 / 2 - bb.size.width as i32 / 2;
-    Text::new(&text, Point::new(x, 176), style)
+    Text::new(&text, Point::new(x, ROW_BASELINE), style)
         .draw(d)
         .map(|_| ())
 }
