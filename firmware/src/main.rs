@@ -377,8 +377,16 @@ pub(crate) fn idle_for() -> std::time::Duration {
 #[cfg(esp32)]
 static BUTTON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The real device reads BOOT once, at boot, so a press while it is already
+/// serving cannot be a wake. Latching one anyway would sit there and cancel
+/// the next sleep the instant the window ran out; counting it as use is both
+/// harmless and what someone pressing it probably meant.
 #[cfg(esp32)]
 pub(crate) fn press_button() {
+    if frame::is_serving() {
+        touch();
+        return;
+    }
     BUTTON.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 

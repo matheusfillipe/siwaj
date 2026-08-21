@@ -45,6 +45,10 @@ pub fn charging() -> bool {
     CHARGING.load(Ordering::Relaxed)
 }
 
+pub fn is_serving() -> bool {
+    SERVING.load(Ordering::Relaxed)
+}
+
 pub fn set_serving(on: bool) {
     SERVING.store(on, Ordering::Relaxed);
     REDRAW_PENDING.store(true, Ordering::Relaxed);
