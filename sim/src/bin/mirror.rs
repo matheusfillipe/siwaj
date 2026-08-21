@@ -17,7 +17,9 @@ const INTERVAL: Duration = Duration::from_secs(1);
 /// Live mirror of the emulated device's e-paper: polls GET /api/frame (make
 /// qemu-run first) and shows the bytes the device last rendered. Polling is
 /// free; the device decides when to fetch weather again.
-/// r refreshes now, q quits.
+///
+/// The bench controls sit on keys so the window is the whole workbench:
+/// r refresh, c charger, b button, s sleep, q quit.
 fn main() {
     let addr = std::env::var("SIWAJ_DEVICE_ADDR").unwrap_or_else(|_| "127.0.0.1:47652".into());
     let scale: u32 = std::env::args()
@@ -30,7 +32,11 @@ fn main() {
         .scale(scale)
         .build();
 
-    let mut window = Window::new("siwaj live display [r refresh, q quit]", &output_settings);
+    let serial = std::env::var("SIWAJ_SERIAL_ADDR").unwrap_or_else(|_| "127.0.0.1:47653".into());
+    let mut window = Window::new(
+        "siwaj [r refresh, c charger, b button, s sleep, q quit]",
+        &output_settings,
+    );
     let mut display = SimulatorDisplay::<BinaryColor>::new(Size::new(WIDTH, HEIGHT));
     let mut last_attempt = Instant::now() - INTERVAL;
     let mut last_face = String::new();
@@ -43,6 +49,14 @@ fn main() {
                 SimulatorEvent::KeyDown { keycode, .. } => match keycode {
                     Keycode::Q => return,
                     Keycode::R => last_attempt -= INTERVAL,
+                    Keycode::C => {
+                        report(toggle_charging(&addr));
+                        last_attempt -= INTERVAL;
+                    }
+                    // the serial line answers while the web server is down,
+                    // which is the only way back from a sleeping device
+                    Keycode::B => report(serial_command(&serial, "button")),
+                    Keycode::S => report(serial_command(&serial, "sleep")),
                     _ => {}
                 },
                 _ => {}
@@ -65,17 +79,76 @@ fn main() {
     }
 }
 
-/// The esp httpd refuses HTTP/1.0 outright and never closes a 1.1 connection,
-/// so the terminating chunk is the only end-of-response signal available.
-fn fetch_frame(addr: &str) -> Result<(Framebuffer, String), String> {
+fn report(outcome: Result<String, String>) {
+    match outcome {
+        Ok(note) => println!("{note}"),
+        Err(e) => println!("{e}"),
+    }
+}
+
+/// Flips the emulator's charger sense, reading the current state first so the
+/// key stays in step with `make qemu-charge`.
+fn toggle_charging(addr: &str) -> Result<String, String> {
+    let raw = request(addr, b"GET /api/sim HTTP/1.1\r\nHost: siwaj\r\n\r\n")?;
+    let (_, body, code) = parts(&raw)?;
+    if code != 200 {
+        return Err(format!("device says {code} for /api/sim"));
+    }
+    let charging = !String::from_utf8_lossy(&body).contains("\"charging\":true");
+    let payload = format!("{{\"charging\":{charging}}}");
+    let post = format!(
+        "POST /api/sim HTTP/1.1\r\nHost: siwaj\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        payload.len()
+    );
+    let raw = request(addr, post.as_bytes())?;
+    let (_, _, code) = parts(&raw)?;
+    if code != 200 {
+        return Err(format!("device says {code} for /api/sim"));
+    }
+    Ok(format!(
+        "charger {}",
+        if charging { "plugged in" } else { "unplugged" }
+    ))
+}
+
+/// QEMU exposes the device's serial port as a plain socket, so a line written
+/// here reaches the same REPL `make qemu-button` talks to.
+fn serial_command(addr: &str, command: &str) -> Result<String, String> {
     let mut stream =
         TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e} (is qemu-run up?)"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| format!("socket: {e}"))?;
     stream
-        .write_all(b"GET /api/frame HTTP/1.1\r\nHost: siwaj\r\n\r\n")
+        .write_all(format!("{command}\n").as_bytes())
         .map_err(|e| format!("send: {e}"))?;
+    // a read returns whatever has arrived, which is regularly half a line
+    let mut reply = String::new();
+    let mut buf = [0u8; 256];
+    while !reply.contains("OK") && !reply.contains("ERR") {
+        match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => reply.push_str(&String::from_utf8_lossy(&buf[..n])),
+        }
+    }
+    match reply
+        .lines()
+        .find(|line| line.contains("OK") || line.contains("ERR"))
+    {
+        Some(line) => Ok(format!("{command}: {}", line.trim())),
+        None => Err(format!("{command}: no reply")),
+    }
+}
+
+/// The esp httpd refuses HTTP/1.0 outright and never closes a 1.1 connection,
+/// so the terminating chunk is the only end-of-response signal available.
+fn request(addr: &str, req: &[u8]) -> Result<Vec<u8>, String> {
+    let mut stream =
+        TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e} (is qemu-run up?)"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|e| format!("socket: {e}"))?;
+    stream.write_all(req).map_err(|e| format!("send: {e}"))?;
 
     let mut raw = Vec::with_capacity(FRAME_BYTES + 512);
     let mut buf = [0u8; 4096];
@@ -86,7 +159,12 @@ fn fetch_frame(addr: &str) -> Result<(Framebuffer, String), String> {
         }
         raw.extend_from_slice(&buf[..n]);
     }
+    Ok(raw)
+}
 
+/// Splits one response into its lowercased head, its decoded body, and the
+/// status the device answered with.
+fn parts(raw: &[u8]) -> Result<(String, Vec<u8>, u16), String> {
     let header_end = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -99,7 +177,15 @@ fn fetch_frame(addr: &str) -> Result<(Framebuffer, String), String> {
     } else {
         tail.to_vec()
     };
-    let code = status_code(&raw).ok_or("no status line")?;
+    let code = status_code(raw).ok_or("no status line")?;
+    Ok((head, body, code))
+}
+
+/// The esp httpd refuses HTTP/1.0 outright and never closes a 1.1 connection,
+/// so the terminating chunk is the only end-of-response signal available.
+fn fetch_frame(addr: &str) -> Result<(Framebuffer, String), String> {
+    let raw = request(addr, b"GET /api/frame HTTP/1.1\r\nHost: siwaj\r\n\r\n")?;
+    let (head, body, code) = parts(&raw)?;
     if code != 200 {
         return Err(format!(
             "device says {code}: {}",

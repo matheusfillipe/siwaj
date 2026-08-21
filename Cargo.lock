@@ -370,10 +370,18 @@ name = "siwaj-core"
 version = "0.0.0"
 dependencies = [
  "embedded-graphics",
- "embedded-graphics-simulator",
  "serde",
  "serde_json",
  "ts-rs",
+]
+
+[[package]]
+name = "siwaj-sim"
+version = "0.0.0"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-simulator",
+ "siwaj-core",
 ]
 
 [[package]]

@@ -241,7 +241,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
         }
         let mut buf = vec![0u8; len];
         req.read_exact(&mut buf)?;
-        let inputs: siwaj_core::SimInputs = match serde_json::from_slice(&buf) {
+        let inputs: crate::frame::SimInputs = match serde_json::from_slice(&buf) {
             Ok(inputs) => inputs,
             Err(_) => {
                 let mut resp = req.into_status_response(400)?;
@@ -258,7 +258,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
     server.fn_handler::<AnyError, _>("/api/sim", Method::Get, |req| {
         serve_json(
             req,
-            &siwaj_core::SimInputs {
+            &crate::frame::SimInputs {
                 charging: crate::frame::charging(),
             },
         )

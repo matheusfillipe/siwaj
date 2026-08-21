@@ -10,16 +10,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 ts-rs = "12.0.1"
 embedded-graphics = "0.8.2"
-embedded-graphics-simulator = { version = "0.8.0", optional = true }
 
 [features]
-# interactive preview window (make core-preview); needs SDL2 at link time
-preview = ["dep:embedded-graphics-simulator"]
-
-[[example]]
-name = "preview"
-required-features = ["preview"]
-
-[[example]]
-name = "mirror"
-required-features = ["preview"]
+# lets a host tool rebuild a frame from the bytes the device hands out; the
+# device only ever packs frames, so this stays out of firmware builds
+preview = []

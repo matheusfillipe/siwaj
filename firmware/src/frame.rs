@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -6,6 +7,16 @@ use siwaj_core::render::{FRAME_BYTES, Framebuffer};
 
 use crate::secrets::Secrets;
 use crate::store::Store;
+
+/// The sense lines QEMU has no hardware for. This lives with the emulator's
+/// frame loop rather than in the shared contract: the device reads the real
+/// board and never takes a reading from the network, so nothing about this
+/// shape belongs in what ships to it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SimInputs {
+    pub charging: bool,
+}
 
 pub struct Frame {
     pub bytes: [u8; FRAME_BYTES],

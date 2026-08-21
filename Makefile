@@ -53,8 +53,8 @@ core-ts: core-test ## regenerate the TypeScript bindings (side effect of the tes
 core-snapshots: ## regenerate render fixtures after an intentional layout/icon change
 	cd core && UPDATE_SNAPSHOTS=1 cargo test --test render_test
 
-core-preview: ## open a window cycling the four garments (needs SDL2: brew install sdl2)
-	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example preview --features preview
+core-preview: ## open a window cycling the garments (needs SDL2: brew install sdl2)
+	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-sim --bin preview --features sdl
 
 demo: core-preview ## alias for core-preview
 
@@ -150,8 +150,8 @@ qemu-smoke: qemu-image ## boot the emulator image once and check the boot banner
 qemu-run: qemu-image ## boot a detached emulated device; web ui on http://127.0.0.1:47652
 	$(UV) python -m siwaj.qemu serve $(QEMU_IMAGE)
 
-qemu-display: ## open an SDL window mirroring the emulated e-paper live (run qemu-run first)
-	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-core --example mirror --features preview
+qemu-display: ## SDL window mirroring the emulated e-paper live; r refresh, c charger, b button, s sleep, q quit (run qemu-run first)
+	LIBRARY_PATH=/opt/homebrew/lib cargo run -p siwaj-sim --bin mirror --features sdl
 
 qemu-stop:
 	$(UV) python -m siwaj.qemu stop

@@ -10,10 +10,11 @@ Firmware and web config app for the siwaj ("should i wear a jacket") e-paper dev
 - Firmware (esp-idf std Rust, xtensa esp32s3): `firmware/` (excluded from the host workspace; needs `espup`)
 - Web config page (vanilla TS, no framework, single minified bundle): `web/`
 - Host tooling (serial provisioner, QEMU smoke runner): `tools/` (python, isolated, ruff+pytest bar only)
+- Simulation harness (SDL display mirror, render preview): `sim/` (host-only Rust, SDL2 behind the `sdl` feature so CI skips it). Nothing that only exists to drive the emulator belongs in `core/`, which ships to the device.
 - The `Makefile` is the single canonical interface for all checks; CI and pre-commit both call it.
 
 ## Stack
-- Rust workspace for `core/` (host-testable, `ts-rs` generates `web/src/generated/` during `cargo test`)
+- Rust workspace for `core/` and `sim/` (host-testable, `ts-rs` generates `web/src/generated/` during `cargo test`)
 - `firmware/`: esp-idf-svc/esp-idf-hal, embedded-graphics + epd-waveshare (epd1in54_v2), NVS (encrypted)
 - `web/`: TypeScript + esbuild via pnpm, zero runtime dependencies, bundle embedded into the firmware binary
 - `tools/`: uv-managed python 3.12, pyserial
@@ -40,6 +41,7 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 2. Fix all failures.
 3. Do not weaken or remove checks to make them pass.
 4. Do not leave TODO stubs in `core/` (shared contract must stay exact).
+5. Emulator affordances stay out of the device build. `strings firmware/target/xtensa-esp32s3-espidf/release/siwaj` must not mention `api/sim`, `api/frame`, or the serial button and sleep replies.
 
 ## Secrets
 `OPENWEATHER_API_KEY` lives only in `.env` (gitignored) and in the device's encrypted NVS, provisioned via `make provision`. Never embed it in firmware, web assets, tests, or docs.
@@ -72,10 +74,10 @@ All commands go through the Makefile. Never call cargo/pnpm/uv/qemu binaries dir
 - esp32 build = QEMU-only variant (config-mode + OpenETH); esp32s3 build = the real device. Target-specific code is `#[cfg]`-gated; keep both warning-free (`make build`).
 - One Call 4.0 serves each resolution from its own endpoint, so a weather cycle spends two requests: `timeline/1h` for feels-like, next-hour pop and the zone offset, `timeline/1min` for the precipitation trace. `core::weather::parse_hourly` then `merge_minutely` fold both into one `Snapshot`; `timeline/1h`'s `data[0]` is the current hour bucket, so feels-like is that hour's value. Budget two calls per wake against the account's daily cap.
 - `GET /api/weather` runs a live One Call fetch with the stored config: device-side debugging aid and the e2e's weather probe. A 401 from upstream means the account's "One Call by Call" plan is not activated yet, not a firmware bug.
-- The emulator has no panel, so the esp32 build runs a frame loop instead: the same fetch and view the s3 cycle draws, published into memory. `GET /api/frame` hands out those 5000 bytes (packed 1bpp, `render::FRAME_BYTES`) with `X-Siwaj-Frame: live|offline`, and `make qemu-display` draws them. Both are `#[cfg(esp32)]`, so the frame loop, the endpoint, and the cached frame exist only in the emulator build.
+- The emulator has no panel, so the esp32 build runs a frame loop instead: the same fetch and view the s3 cycle draws, published into memory. `GET /api/frame` hands out those 5000 bytes (packed 1bpp, `render::FRAME_BYTES`) with `X-Siwaj-Frame: live|offline`, and `make qemu-display` draws them, and puts the bench controls on keys: c flips the charger over `/api/sim`, b and s drive the serial button and sleep, so the window is the whole workbench. Both are `#[cfg(esp32)]`, so the frame loop, the endpoint, and the cached frame exist only in the emulator build.
 - Config mode serves only while it is being used: `siwaj_core::CONFIG_MODE_IDLE` after the last request the server is dropped, and the s3 deep sleeps into the next weather cycle. Requests count as activity from `serve_gz`/`serve_json`, so a new handler stays awake by default; `GET /api/status` opts out through `write_json` because a page watching the clock must not stop it reaching zero. Editing sends nothing on its own, so the page refetches its config while someone works.
 - The emulator cannot deep sleep under QEMU, so it parks on the serial REPL instead: `make qemu-sleep` ends the window now and `make qemu-button` plays the BOOT button the s3 reads from GPIO0. Serial answers when HTTP does not, which is what makes it the channel that can wake a device that stopped serving. Both commands are `#[cfg(esp32)]`.
-- `POST /api/sim` (`#[cfg(esp32)]`, `SimInputs` in core) drives the sense lines QEMU has no hardware for: `make qemu-charge` / `make qemu-unplug` flip the charging bolt. A flipped switch redraws from the weather already in hand, so it costs no upstream call. The device reads `Board::battery` instead and never takes a sense reading from the network.
+- `POST /api/sim` (`#[cfg(esp32)]`, `SimInputs` in `firmware/src/frame.rs`) drives the sense lines QEMU has no hardware for: `make qemu-charge` / `make qemu-unplug` flip the charging bolt. A flipped switch redraws from the weather already in hand, so it costs no upstream call. The device reads `Board::battery` instead and never takes a sense reading from the network.
 - Charging on the real board is inferred from rail voltage at or above `Battery::EXTERNAL_POWER`, which only a charger can hold. A charge that has not lifted the rail that far still reads as running on battery; a proper answer needs a VBUS or charger STAT line.
 - A cycle whose fetch fails still renders, as the offline face; `Config::next_fetch_delay` then retries on `OFFLINE_RETRY` instead of the full refresh interval, so a device recovers once upstream does. The face travels with the frame because an offline frame is a well-formed frame and would otherwise pass every shape check.
 - NVS keys are capped at 15 chars: `Secrets` maps `.env` names to short keys (`ow_key`, `wifi_ssid`, `wifi_pass`).
