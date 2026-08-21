@@ -12,10 +12,12 @@ const AXIS_MAX = 30;
 const STEP = 0.5;
 
 interface Parts {
+  /// The bar itself, which is what pointer positions are measured against.
   track: HTMLElement;
+  bands: [HTMLElement, HTMLElement, HTMLElement];
   low: HTMLElement;
   high: HTMLElement;
-  ranges: [HTMLElement, HTMLElement, HTMLElement];
+  values: [HTMLElement, HTMLElement];
 }
 
 function snap(value: number): number {
@@ -29,6 +31,10 @@ function degrees(value: number): string {
 function percent(value: number): number {
   return ((value - AXIS_MIN) / (AXIS_MAX - AXIS_MIN)) * 100;
 }
+
+/// Roughly one readout wide. Closer than this and two centred labels overlap
+/// into an unreadable smear, so each one points away from the other instead.
+const LABEL_CLEARANCE_PX = 68;
 
 export class BandPicker {
   private thresholds: Thresholds = { lowC: 8, highC: 18 };
@@ -123,21 +129,29 @@ export class BandPicker {
   private render(): void {
     const { lowC, highC } = this.thresholds;
     const spans = [lowC - AXIS_MIN, highC - lowC, AXIS_MAX - highC];
-    const labels = [`below ${degrees(lowC)}`, `to ${degrees(highC)}`, "above"];
-    this.parts.ranges.forEach((cell, i) => {
-      const band = cell.parentElement as HTMLElement;
+    this.parts.bands.forEach((band, i) => {
       band.style.flexGrow = String(Math.max(spans[i] ?? 0, 0));
-      cell.textContent = labels[i] ?? "";
     });
-    for (const [handle, value] of [
-      [this.parts.low, lowC],
-      [this.parts.high, highC],
-    ] as const) {
+    const dividers = [
+      [this.parts.low, this.parts.values[0], lowC],
+      [this.parts.high, this.parts.values[1], highC],
+    ] as const;
+    for (const [handle, label, value] of dividers) {
       handle.style.left = `${percent(value)}%`;
       handle.setAttribute("aria-valuemin", String(AXIS_MIN));
       handle.setAttribute("aria-valuemax", String(AXIS_MAX));
       handle.setAttribute("aria-valuenow", String(value));
       handle.setAttribute("aria-valuetext", degrees(value));
+      label.textContent = degrees(value);
     }
+    this.spaceLabels(highC - lowC);
+  }
+
+  private spaceLabels(spread: number): void {
+    const width = this.parts.track.getBoundingClientRect().width;
+    if (width === 0) return;
+    const apart = (spread / (AXIS_MAX - AXIS_MIN)) * width >= LABEL_CLEARANCE_PX;
+    this.parts.low.classList.toggle("crowded", !apart);
+    this.parts.high.classList.toggle("crowded", !apart);
   }
 }

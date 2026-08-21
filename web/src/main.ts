@@ -21,6 +21,8 @@ interface Elements {
   bandShirt: HTMLElement;
   handleLow: HTMLElement;
   handleHigh: HTMLElement;
+  valueLow: HTMLElement;
+  valueHigh: HTMLElement;
 }
 
 function elements(): Elements {
@@ -41,6 +43,8 @@ function elements(): Elements {
     bandShirt: document.getElementById("bandShirt") as HTMLElement,
     handleLow: document.getElementById("handleLow") as HTMLElement,
     handleHigh: document.getElementById("handleHigh") as HTMLElement,
+    valueLow: document.getElementById("valueLow") as HTMLElement,
+    valueHigh: document.getElementById("valueHigh") as HTMLElement,
   };
 }
 
@@ -164,9 +168,10 @@ function main(): void {
   const bands = new BandPicker(
     {
       track: el.bands,
+      bands: [el.bandJacket, el.bandPullover, el.bandShirt],
       low: el.handleLow,
       high: el.handleHigh,
-      ranges: [el.bandJacket, el.bandPullover, el.bandShirt],
+      values: [el.valueLow, el.valueHigh],
     },
     () => {
       setStatus(el, "");

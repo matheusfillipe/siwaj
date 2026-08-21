@@ -34,12 +34,18 @@
       <fieldset>
         <legend>What to wear, by feels-like &deg;C</legend>
 
-        <div id="bands" class="bands">
-          <div class="band" data-band="jacket"><span class="band-name">jacket</span><span class="band-range" id="bandJacket"></span></div>
-          <div class="band" data-band="pullover"><span class="band-name">pullover</span><span class="band-range" id="bandPullover"></span></div>
-          <div class="band" data-band="shirt"><span class="band-name">shirt</span><span class="band-range" id="bandShirt"></span></div>
-          <div class="handle" id="handleLow" role="slider" tabindex="0" aria-label="jacket below"></div>
-          <div class="handle" id="handleHigh" role="slider" tabindex="0" aria-label="pullover below"></div>
+        <div class="picker">
+          <div id="bands" class="bands">
+            <div class="band" id="bandJacket" data-band="jacket">jacket</div>
+            <div class="band" id="bandPullover" data-band="pullover">pullover</div>
+            <div class="band" id="bandShirt" data-band="shirt">shirt</div>
+          </div>
+          <div class="handle" id="handleLow" data-edge="low" role="slider" tabindex="0" aria-label="jacket below">
+            <span class="handle-value" id="valueLow"></span>
+          </div>
+          <div class="handle" id="handleHigh" data-edge="high" role="slider" tabindex="0" aria-label="pullover below">
+            <span class="handle-value" id="valueHigh"></span>
+          </div>
         </div>
         <p class="hint">Drag the two dividers to set where each garment starts.</p>
       </fieldset>
