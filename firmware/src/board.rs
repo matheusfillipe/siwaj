@@ -85,12 +85,15 @@ mod device {
             self.epd
                 .update_frame(&mut self.spi, fb.buffer(), &mut self.delay)?;
             self.epd.display_frame(&mut self.spi, &mut self.delay)?;
-            self.epd.sleep(&mut self.spi, &mut self.delay)?;
             Ok(())
         }
 
         // both rails are active-low: high = off, minimum sleep current
+        /// Sleeping the panel belongs here rather than at the end of a draw:
+        /// a cycle can paint more than once, and the controller only needs to
+        /// go down when the board does.
         pub fn power_down(&mut self) {
+            let _ = self.epd.sleep(&mut self.spi, &mut self.delay);
             let _ = self.epd_power.set_high();
             // SAFETY: GPIO42 (audio amp rail) is owned by no other driver; a
             // momentary steal to latch it off is the only use.

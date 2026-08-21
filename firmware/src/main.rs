@@ -192,31 +192,46 @@ fn run_config_mode(
 
     #[cfg(esp32s3)]
     {
-        // The panel holds whatever it was last given, so setup mode puts the
-        // mark up itself; leaving it is what takes the mark down again.
+        // The panel holds whatever it was last given, so setup mode paints
+        // the mark on the way in and paints it away on the way out. The board
+        // stays up across the session and only sleeps once, at the end.
         let mut board = board::Board::new(pins, spi2, adc1)?;
-        let mut view = siwaj_core::render::View::offline(
+        let mut setup = siwaj_core::render::View::offline(
             siwaj_core::render::TimeOfDay::from_unix(now_unix()),
             board.battery.pct(),
             board.battery.charging(),
         );
-        view.serving = true;
-        board.draw(&view)?;
-        board.power_down();
+        setup.serving = true;
+        board.draw(&setup)?;
 
         serve_until_idle(store, secrets_store)?;
 
-        // A configured device restarts rather than sleeping: the next boot is
-        // a weather cycle, which repaints within seconds and clears the mark.
-        // An unconfigured one has no weather to show, so it keeps the setup
-        // screen and sleeps instead of looping back into config mode.
-        if store.load().ok().flatten().is_some() {
-            log::info!("leaving setup; restarting into the weather cycle");
-            // SAFETY: full SoC restart with nothing in flight; the config and
-            // secrets already live in NVS and the server has been dropped.
-            unsafe { esp_idf_svc::sys::esp_restart() }
+        // Leaving setup repaints before the radio goes off: the weather the
+        // device now has if it was configured, the plain offline face if the
+        // setup was abandoned. Either way the mark goes with it.
+        let config = store.load().ok().flatten();
+        let leaving = match config.as_ref() {
+            Some(config) => weather_view(
+                secrets_store,
+                config,
+                board.battery.pct(),
+                board.battery.charging(),
+            ),
+            None => siwaj_core::render::View::offline(
+                siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+                board.battery.pct(),
+                board.battery.charging(),
+            ),
+        };
+        if let Err(e) = board.draw(&leaving) {
+            log::error!("leaving setup: panel repaint failed: {e}");
         }
-        deep_sleep(WAKE_INTERVAL);
+        board.power_down();
+        let refresh = config
+            .as_ref()
+            .map(siwaj_core::Config::refresh_interval)
+            .unwrap_or(WAKE_INTERVAL);
+        deep_sleep(refresh);
     }
     #[cfg(esp32)]
     loop {
