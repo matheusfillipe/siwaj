@@ -30,6 +30,9 @@ static LAST: Mutex<Option<Frame>> = Mutex::new(None);
 /// charging frame can be exercised without a bench supply.
 static CHARGING: AtomicBool = AtomicBool::new(false);
 static REDRAW_PENDING: AtomicBool = AtomicBool::new(false);
+/// Whether the config page is up, so the mirror shows the same mark the panel
+/// would carry while the device is serving.
+static SERVING: AtomicBool = AtomicBool::new(false);
 
 const POLL: Duration = Duration::from_secs(1);
 
@@ -40,6 +43,11 @@ pub fn set_charging(on: bool) {
 
 pub fn charging() -> bool {
     CHARGING.load(Ordering::Relaxed)
+}
+
+pub fn set_serving(on: bool) {
+    SERVING.store(on, Ordering::Relaxed);
+    REDRAW_PENDING.store(true, Ordering::Relaxed);
 }
 
 /// Borrowed rather than copied out: the frame is 5000 bytes and the httpd
@@ -71,6 +79,8 @@ pub fn spawn_loop(store: &'static Store, secrets: &'static Secrets) {
                                 simulated_battery(booted),
                                 charging(),
                             );
+                            let mut view = view;
+                            view.serving = SERVING.load(Ordering::Relaxed);
                             let live = !view.offline;
                             publish(&siwaj_core::render::render(&view), live);
                             rendered = Some((config.revision, Instant::now(), live));
@@ -82,6 +92,7 @@ pub fn spawn_loop(store: &'static Store, secrets: &'static Secrets) {
                             if let Some(view) = showing.as_mut() {
                                 view.battery_pct = simulated_battery(booted);
                                 view.charging = charging();
+                                view.serving = SERVING.load(Ordering::Relaxed);
                                 publish(&siwaj_core::render::render(view), !view.offline);
                             }
                         }

@@ -22,6 +22,7 @@ fn view(garment: Garment, pop: u8, expected: bool, feels: f32) -> View {
         },
         battery_pct: Some(87),
         charging: false,
+        serving: false,
         offline: false,
     }
 }

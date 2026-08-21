@@ -131,6 +131,10 @@ pub struct View {
     /// label rather than a fabricated charge level.
     pub battery_pct: Option<u8>,
     pub charging: bool,
+    /// The config page is being served. The panel holds its last image while
+    /// the device sleeps, so without a mark there is nothing to tell someone
+    /// the radio is on and the setup page is reachable.
+    pub serving: bool,
     pub offline: bool,
 }
 
@@ -149,6 +153,7 @@ impl View {
             updated,
             battery_pct,
             charging,
+            serving: false,
             offline: true,
         }
     }
@@ -172,6 +177,7 @@ impl View {
             ),
             battery_pct,
             charging,
+            serving: false,
             offline: false,
         }
     }
@@ -376,6 +382,25 @@ fn big_text_width(text: &str, cell: i32) -> i32 {
     w - cell
 }
 
+/// A dot with two arcs over it, in the corner the garment leaves free.
+fn draw_serving<D: DrawTarget<Color = BinaryColor>>(d: &mut D) -> Result<(), D::Error> {
+    let (cx, cy) = (18, 26);
+    Circle::with_center(Point::new(cx, cy), 5)
+        .into_styled(FILL)
+        .draw(d)?;
+    for (radius, thickness) in [(14u32, 3u32), (24, 3)] {
+        let arc = embedded_graphics::primitives::Arc::with_center(
+            Point::new(cx, cy),
+            radius,
+            embedded_graphics::geometry::Angle::from_degrees(215.0),
+            embedded_graphics::geometry::Angle::from_degrees(110.0),
+        );
+        arc.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, thickness))
+            .draw(d)?;
+    }
+    Ok(())
+}
+
 fn centered_small<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     cx: i32,
@@ -492,6 +517,9 @@ pub fn render(view: &View) -> Framebuffer {
 
 pub fn render_to<D: DrawTarget<Color = BinaryColor>>(d: &mut D, view: &View) {
     draw_garment(d, view.garment).ok();
+    if view.serving {
+        draw_serving(d).ok();
+    }
     if view.offline {
         centered_small(d, WIDTH as i32 / 2, 108, "offline").ok();
     } else {

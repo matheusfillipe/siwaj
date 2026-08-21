@@ -19,6 +19,7 @@ fn view(garment: Garment, rain: RainOutlook, feels_like: f32) -> View {
         },
         battery_pct: Some(87),
         charging: false,
+        serving: false,
         offline: false,
     }
 }
@@ -51,6 +52,11 @@ fn cases() -> Vec<(&'static str, View)> {
             view(Garment::from_feels_like(24.0, &t), rain(45, false), 24.0),
         ),
         ("battery_unknown", battery_unknown),
+        ("serving", {
+            let mut serving = view(Garment::from_feels_like(11.0, &t), rain(10, false), 11.0);
+            serving.serving = true;
+            serving
+        }),
         (
             "offline",
             View::offline(TimeOfDay { hour: 9, minute: 5 }, Some(41), false),

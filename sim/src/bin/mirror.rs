@@ -39,7 +39,9 @@ fn main() {
     );
     let mut display = SimulatorDisplay::<BinaryColor>::new(Size::new(WIDTH, HEIGHT));
     let mut last_attempt = Instant::now() - INTERVAL;
-    let mut last_face = String::new();
+    // the poll runs every second, so only changes are worth a line; a device
+    // that stopped answering would otherwise fill the terminal
+    let mut last_note = String::new();
 
     loop {
         window.update(&display);
@@ -64,15 +66,16 @@ fn main() {
         }
         if last_attempt.elapsed() >= INTERVAL {
             last_attempt = Instant::now();
-            match fetch_frame(&addr) {
+            let note = match fetch_frame(&addr) {
                 Ok((fb, face)) => {
-                    if face != last_face {
-                        println!("{face} frame");
-                        last_face = face;
-                    }
                     display = draw(&fb);
+                    format!("{face} frame")
                 }
-                Err(e) => println!("{e}"),
+                Err(e) => e,
+            };
+            if note != last_note {
+                println!("{note}");
+                last_note = note;
             }
         }
         std::thread::sleep(Duration::from_millis(50));

@@ -117,13 +117,7 @@ fn main() -> anyhow::Result<()> {
         #[cfg(esp32)]
         run_config_mode(mac, sys_loop, store, secrets_store)?;
         #[cfg(esp32s3)]
-        run_config_mode(
-            hardware.modem,
-            sys_loop,
-            nvs_partition,
-            store,
-            secrets_store,
-        )?;
+        run_config_mode(hardware, sys_loop, nvs_partition, store, secrets_store)?;
         return Ok(());
     }
 
@@ -164,12 +158,19 @@ fn main() -> anyhow::Result<()> {
 
 fn run_config_mode(
     #[cfg(esp32)] mac: esp_idf_svc::hal::mac::MAC<'static>,
-    #[cfg(esp32s3)] modem: esp_idf_svc::hal::modem::Modem<'static>,
+    #[cfg(esp32s3)] hardware: Hardware,
     sys_loop: esp_idf_svc::eventloop::EspSystemEventLoop,
     #[cfg(esp32s3)] nvs_partition: esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault>,
     store: &'static store::Store,
     secrets_store: &'static secrets::Secrets,
 ) -> anyhow::Result<()> {
+    #[cfg(esp32s3)]
+    let Hardware {
+        pins,
+        modem,
+        spi2,
+        adc1,
+    } = hardware;
     #[cfg(esp32s3)]
     let net = net::bring_up(
         modem,
@@ -189,19 +190,33 @@ fn run_config_mode(
     frame::spawn_loop(store, secrets_store);
     core::mem::forget(net);
 
-    // The device sleeps once the page goes quiet and wakes in weather mode,
-    // so config mode ends here. The emulator cannot sleep, so it parks on the
-    // serial line and serves again on the next button press.
     #[cfg(esp32s3)]
     {
+        // The panel holds whatever it was last given, so setup mode puts the
+        // mark up itself; leaving it is what takes the mark down again.
+        let mut board = board::Board::new(pins, spi2, adc1)?;
+        let mut view = siwaj_core::render::View::offline(
+            siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+            board.battery.pct(),
+            board.battery.charging(),
+        );
+        view.serving = true;
+        board.draw(&view)?;
+        board.power_down();
+
         serve_until_idle(store, secrets_store)?;
-        let refresh = store
-            .load()
-            .ok()
-            .flatten()
-            .map(|config| config.refresh_interval())
-            .unwrap_or(WAKE_INTERVAL);
-        deep_sleep(refresh);
+
+        // A configured device restarts rather than sleeping: the next boot is
+        // a weather cycle, which repaints within seconds and clears the mark.
+        // An unconfigured one has no weather to show, so it keeps the setup
+        // screen and sleeps instead of looping back into config mode.
+        if store.load().ok().flatten().is_some() {
+            log::info!("leaving setup; restarting into the weather cycle");
+            // SAFETY: full SoC restart with nothing in flight; the config and
+            // secrets already live in NVS and the server has been dropped.
+            unsafe { esp_idf_svc::sys::esp_restart() }
+        }
+        deep_sleep(WAKE_INTERVAL);
     }
     #[cfg(esp32)]
     loop {
@@ -219,10 +234,14 @@ fn serve_until_idle(
 ) -> anyhow::Result<()> {
     let server = server::start(store, secrets_store)?;
     touch();
+    #[cfg(esp32)]
+    frame::set_serving(true);
     while idle_for() < siwaj_core::CONFIG_MODE_IDLE {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     drop(server);
+    #[cfg(esp32)]
+    frame::set_serving(false);
     log::info!(
         "config mode idle for {}s; stopping the server",
         siwaj_core::CONFIG_MODE_IDLE.as_secs()
