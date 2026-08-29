@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import serial
+import serial.tools.list_ports
 
 BAUD = 115200
 SETTLE_SECONDS = 2.0
@@ -64,15 +65,48 @@ def provision(port: str, env_path: Path) -> int:
     return 0
 
 
+"""USB vendors the board can appear under: Espressif's own on-die USB, and the
+UART bridges other revisions carry. Matching the vendor keeps unrelated
+usbmodem devices (a monitor's control channel, a phone) out of the running."""
+BOARD_VENDOR_IDS = frozenset(
+    {
+        0x303A,  # Espressif USB-serial-JTAG
+        0x10C4,  # Silicon Labs CP210x
+        0x1A86,  # WCH CH34x
+        0x0403,  # FTDI
+    }
+)
+
+
+def board_ports() -> list[str]:
+    return [p.device for p in serial.tools.list_ports.comports() if p.vid in BOARD_VENDOR_IDS]
+
+
+def detect_port() -> str | None:
+    """The board enumerates under a different name on every host, so the port
+    is discovered rather than assumed. Ambiguity is the caller's to resolve."""
+    candidates = board_ports()
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default=os.environ.get("SIWAJ_PORT", "/dev/cu.usbmodem101"))
+    parser.add_argument("--port", default=os.environ.get("SIWAJ_PORT"))
     parser.add_argument("--env", type=Path, default=Path(__file__).resolve().parents[3] / ".env")
     args = parser.parse_args()
     if not args.env.exists():
         print(f"missing {args.env}; copy .env.example to .env first", file=sys.stderr)
         return 1
-    return provision(args.port, args.env)
+    port = args.port or detect_port()
+    if port is None:
+        seen = [
+            f"{p.device} (vid {p.vid:#06x})" if p.vid else p.device
+            for p in serial.tools.list_ports.comports()
+        ]
+        print(f"no single board to provision; pass --port. seen: {seen}", file=sys.stderr)
+        return 1
+    print(f"provisioning over {port}")
+    return provision(port, args.env)
 
 
 if __name__ == "__main__":
