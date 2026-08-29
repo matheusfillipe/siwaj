@@ -35,28 +35,49 @@ fn main() -> anyhow::Result<()> {
     let sys_loop = esp_idf_svc::eventloop::EspSystemEventLoop::take()?;
     let nvs_partition = esp_idf_svc::nvs::EspDefaultNvsPartition::take()?;
 
-    // stdin needs the UART0 driver attached to VFS; console output works without it
-    // SAFETY: GPIO1/3 are the UART0 TX/RX pads and are handed straight to the
-    // UART0 driver below; nothing else owns them at boot.
-    let _uart0_driver = Box::leak(Box::new(
-        esp_idf_svc::hal::uart::UartDriver::new(
-            peripherals.uart0,
-            unsafe { esp_idf_svc::hal::gpio::AnyOutputPin::steal(1) },
-            unsafe { esp_idf_svc::hal::gpio::AnyInputPin::steal(3) },
-            Option::<esp_idf_svc::hal::gpio::AnyInputPin>::None,
-            Option::<esp_idf_svc::hal::gpio::AnyOutputPin>::None,
-            &esp_idf_svc::hal::uart::config::Config::new()
-                .baudrate(esp_idf_svc::hal::units::Hertz(115_200)),
-        )
-        .expect("uart0 driver"),
-    ));
-    // SAFETY: the UART0 driver was just initialized; this call only attaches
-    // it to the VFS layer so stdin reads reach the driver. Called once.
-    unsafe {
-        esp_idf_svc::sys::esp_vfs_dev_uart_use_driver(
-            esp_idf_svc::sys::uart_port_t_UART_NUM_0 as i32,
-        )
-    };
+    // The provisioner reaches the secrets REPL over whichever line carries
+    // stdin, and that line differs per target: UART0 under the emulator, the
+    // on-die USB-SERIAL-JTAG behind the board's USB-C. Either way a driver has
+    // to be attached to VFS, because console output alone leaves stdin dead.
+    #[cfg(esp32)]
+    {
+        // SAFETY: GPIO1/3 are the UART0 TX/RX pads and are handed straight to
+        // the UART0 driver; nothing else owns them at boot.
+        let _uart0_driver = Box::leak(Box::new(
+            esp_idf_svc::hal::uart::UartDriver::new(
+                peripherals.uart0,
+                unsafe { esp_idf_svc::hal::gpio::AnyOutputPin::steal(1) },
+                unsafe { esp_idf_svc::hal::gpio::AnyInputPin::steal(3) },
+                Option::<esp_idf_svc::hal::gpio::AnyInputPin>::None,
+                Option::<esp_idf_svc::hal::gpio::AnyOutputPin>::None,
+                &esp_idf_svc::hal::uart::config::Config::new()
+                    .baudrate(esp_idf_svc::hal::units::Hertz(115_200)),
+            )
+            .expect("uart0 driver"),
+        ));
+        // SAFETY: the UART0 driver was just initialized; this call only
+        // attaches it to the VFS layer so stdin reads reach it. Called once.
+        unsafe {
+            esp_idf_svc::sys::esp_vfs_dev_uart_use_driver(
+                esp_idf_svc::sys::uart_port_t_UART_NUM_0 as i32,
+            )
+        };
+    }
+    #[cfg(esp32s3)]
+    {
+        let mut config = esp_idf_svc::sys::usb_serial_jtag_driver_config_t {
+            tx_buffer_size: 1024,
+            rx_buffer_size: 1024,
+        };
+        // SAFETY: installs the USB-SERIAL-JTAG driver and points VFS at it,
+        // once, before any thread reads stdin. The config outlives the call.
+        esp_idf_svc::sys::esp!(unsafe {
+            esp_idf_svc::sys::usb_serial_jtag_driver_install(&mut config)
+        })?;
+        // SAFETY: the driver above is installed; this only routes stdin
+        // through it.
+        unsafe { esp_idf_svc::sys::esp_vfs_usb_serial_jtag_use_driver() };
+    }
 
     let store = Box::leak(Box::new(store::take(nvs_partition.clone())?));
     let secrets_store = Box::leak(Box::new(secrets::take(nvs_partition.clone())?));
@@ -191,7 +212,9 @@ fn run_config_mode(
     #[cfg(esp32)]
     let net = net::bring_up(mac, sys_loop)?;
 
-    sync_time();
+    if !net::is_access_point(&net) {
+        sync_time();
+    }
     if let Some(ip) = net::ip_info(&net) {
         log::info!("config mode: serving on http://{}", ip.ip);
     }

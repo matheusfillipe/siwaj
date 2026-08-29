@@ -7,7 +7,7 @@ UV := uv run --project tools
         core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo \
         web-typecheck web-bundle web-watch \
         tools-format tools-format-check tools-lint tools-test \
-        firmware-partitions build build-qemu firmware-image firmware-flash firmware-monitor \
+        firmware-partitions build build-qemu firmware-image firmware-flash firmware-flash-plain firmware-monitor \
         qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-reset \
         qemu-charge qemu-unplug qemu-sleep qemu-button qemu-provision provision test-e2e \
         ci-host-checks ci-emulator-tests ci-local ci-local-plan \
@@ -89,7 +89,8 @@ firmware-partitions:
 	printf 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="%s/partitions.csv"\n' "$$PWD/firmware" > firmware/sdkconfig.partitions
 	printf 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="%s/partitions.esp32.csv"\n' "$$PWD/firmware" > firmware/sdkconfig.partitions-esp32
 
-FW_ENV := ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions" ESP_IDF_SDKCONFIG="$$PWD/sdkconfig"
+S3_SDKCONFIG := $$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions;$$PWD/sdkconfig.esp32s3
+FW_ENV := ESP_IDF_SDKCONFIG_DEFAULTS="$(S3_SDKCONFIG)" ESP_IDF_SDKCONFIG="$$PWD/sdkconfig"
 FW_ENV_QEMU := ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions-esp32;$$PWD/sdkconfig.esp32" ESP_IDF_SDKCONFIG="$$PWD/target-esp32/sdkconfig"
 
 build: web-bundle firmware-partitions ## build the esp32s3 device firmware (release)
@@ -101,11 +102,24 @@ firmware-image: build ## build and merge the device flash image (8MB)
 	cd firmware && $(FW_ENV) cargo espflash save-image --release --chip esp32s3 --merge --skip-padding target/siwaj-flash.bin
 	truncate -s 8M firmware/target/siwaj-flash.bin
 
+# espflash asks which serial device to use when more than one is plausible,
+# which fails wherever there is no terminal to ask. The provisioner already
+# knows how to pick the board out, so both tools name the same port.
+PORT ?= $(shell $(UV) python -c 'from siwaj.provision import detect_port; print(detect_port() or "")')
+PORT_ARG = $(if $(PORT),--port $(PORT),$(error no board on USB. check the cable carries data, plug into the machine rather than a hub, and hold BOOT while tapping RESET; or name it with PORT=/dev/...))
+
 firmware-flash: build ## flash the device (needs espup + cargo-espflash; encrypted-NVS sdkconfig applied)
-	cd firmware && ESP_IDF_SDKCONFIG_DEFAULTS="$$PWD/sdkconfig.defaults;$$PWD/sdkconfig.partitions;$$PWD/sdkconfig.secure" cargo espflash flash --release --monitor
+	cd firmware && ESP_IDF_SDKCONFIG_DEFAULTS="$(S3_SDKCONFIG);$$PWD/sdkconfig.secure" cargo espflash flash --release --monitor $(PORT_ARG)
+
+# Bring-up flash for a new board. Enabling flash encryption burns an efuse on
+# first boot and the chip stays encrypted for life, so a fresh board proves its
+# panel, radio and sleep on a plaintext image first. Secrets written while this
+# image runs sit in plaintext NVS: provision the real ones after firmware-flash.
+firmware-flash-plain: build ## flash the device without flash/NVS encryption (new-board bring-up)
+	cd firmware && $(FW_ENV) cargo espflash flash --release --monitor $(PORT_ARG)
 
 firmware-monitor:
-	cd firmware && cargo espflash monitor
+	cd firmware && cargo espflash monitor $(PORT_ARG)
 
 # --- emulated device ---
 

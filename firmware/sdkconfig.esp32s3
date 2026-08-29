@@ -1,0 +1,8 @@
+# Device-only console overlay, applied by the Makefile's FW_ENV.
+#
+# The board's USB-C goes to the S3's on-die USB-SERIAL-JTAG. Left at the
+# default that peripheral is only the *secondary* console, which carries log
+# output and no stdin, so the secrets REPL has nothing to read and `make
+# provision` gets silence. Making it the console is what gives provisioning a
+# way in over the same cable that flashes the board.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

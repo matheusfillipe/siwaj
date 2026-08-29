@@ -1,5 +1,9 @@
-# Rust often needs a bit of an extra main task stack size compared to C (the default is 3K)
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# The main task draws the panel, and `render` returns a whole FRAME_BYTES
+# framebuffer by value, so a draw costs 5K of stack before the formatting
+# machinery underneath it runs. This stack is carved out of the heap, so
+# overflowing it corrupts heap metadata and the failure surfaces much later
+# as a crash inside malloc.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=24576
 
 # Increase a bit these stack sizes as they are also a bit too small by default
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096

@@ -13,6 +13,9 @@ pub struct NetUp {
 #[cfg(esp32s3)]
 pub struct NetUp {
     pub wifi: BlockingWifi<EspWifi<'static>>,
+    /// Only one of the two interfaces is ever started, and reading the address
+    /// off the other one yields 0.0.0.0.
+    access_point: bool,
 }
 
 #[cfg(esp32)]
@@ -83,7 +86,10 @@ pub fn bring_up(
     };
     let ip_info: IpInfo = netif.get_ip_info()?;
     log::info!("wifi up: {ip_info:?}");
-    Ok(NetUp { wifi })
+    Ok(NetUp {
+        wifi,
+        access_point: ap_mode,
+    })
 }
 
 /// wait_netif_up blocks forever on a network that never delivers DHCP, so the
@@ -117,6 +123,25 @@ pub fn ip_info(net: &NetUp) -> Option<IpInfo> {
     }
     #[cfg(esp32s3)]
     {
-        net.wifi.wifi().sta_netif().get_ip_info().ok()
+        let netif = if net.access_point {
+            net.wifi.wifi().ap_netif()
+        } else {
+            net.wifi.wifi().sta_netif()
+        };
+        netif.get_ip_info().ok()
+    }
+}
+
+/// True while the device is its own network. Nothing upstream is reachable
+/// then, so work that needs the internet is skipped rather than timed out.
+pub fn is_access_point(net: &NetUp) -> bool {
+    #[cfg(esp32)]
+    {
+        let _ = net;
+        false
+    }
+    #[cfg(esp32s3)]
+    {
+        net.access_point
     }
 }
