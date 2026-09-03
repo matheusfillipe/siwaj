@@ -52,6 +52,17 @@ jobs:
         with:
           ldproxy: true
           version: 1.95.0.0
+      # the prebuilt QEMU fork links SDL2 even when it runs headless
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-2.0-0 libslirp0 libpixman-1-0
+      # the xtensa action brings espup and ldproxy but not espflash, and
+      # building it from source costs more than fetching the release binary
+      - name: Install cargo-espflash
+        run: |
+          curl -sSLo /tmp/cargo-espflash.zip \
+            https://github.com/esp-rs/espflash/releases/download/v4.5.0/cargo-espflash-x86_64-unknown-linux-gnu.zip
+          unzip -oq /tmp/cargo-espflash.zip -d "$HOME/.cargo/bin"
+          chmod +x "$HOME/.cargo/bin/cargo-espflash"
+          cargo espflash --version
       - uses: actions/cache@v6
         with:
           path: |
