@@ -101,7 +101,23 @@ pub fn spawn_loop(store: &'static Store, secrets: &'static Secrets) {
                             }
                         }
                     }
-                    Ok(None) => {}
+                    // An unconfigured device still has a panel. The s3 paints
+                    // the setup face on its way into config mode, so the
+                    // emulator publishes the same thing rather than leaving
+                    // the mirror with nothing to show.
+                    Ok(None) => {
+                        let switched = REDRAW_PENDING.swap(false, Ordering::Relaxed);
+                        if showing.is_none() || switched {
+                            let mut view = siwaj_core::render::View::offline(
+                                siwaj_core::render::TimeOfDay::from_unix(crate::now_unix()),
+                                simulated_battery(booted),
+                                charging(),
+                            );
+                            view.serving = SERVING.load(Ordering::Relaxed);
+                            publish(&siwaj_core::render::render(&view), false);
+                            showing = Some(view);
+                        }
+                    }
                     Err(e) => log::error!("stored config unreadable: {e:#}"),
                 }
                 std::thread::sleep(POLL);

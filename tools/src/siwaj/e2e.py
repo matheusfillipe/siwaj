@@ -138,22 +138,31 @@ def main() -> int:
             "locationName": "Berlin",
         }
         status, saved = http_json("POST", "/api/config", submit)
-        results.append(check("POST /api/config -> 200", status == 200))
-        assert isinstance(saved, dict)
-        results.append(check("revision bumped to 1", saved.get("revision") == 1))
         if has_key:
+            results.append(check("POST /api/config -> 200", status == 200))
+            assert isinstance(saved, dict)
+            results.append(check("revision bumped to 1", saved.get("revision") == 1))
             lat = isinstance(saved.get("location"), dict) and saved["location"].get("lat")
             results.append(
                 check("geocoded Berlin", bool(lat and 52.0 < float(lat) < 53.0), str(lat))
             )
         else:
-            print("  SKIP  geocoding (no .env key)")
+            # the device geocodes the city before it stores anything, so with
+            # no key the only correct answer is a refusal
+            results.append(
+                check("POST /api/config refused with no key", status == 422, str(saved)[:80])
+            )
 
         print("e2e: persistence")
         status, state = http_json("GET", "/api/config")
         assert isinstance(state, dict)
-        configured = state.get("configured") is True and state.get("revision") == 1
-        results.append(check("config persisted", configured))
+        if has_key:
+            configured = state.get("configured") is True and state.get("revision") == 1
+            results.append(check("config persisted", configured))
+        else:
+            results.append(
+                check("nothing stored from the refused config", state.get("configured") is False)
+            )
 
         if has_key:
             print("e2e: weather debug endpoint")
