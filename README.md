@@ -2,7 +2,11 @@
 
 Should i wear a jacket? This little e-paper sign answers before you finish asking.
 
-It is a Waveshare ESP32-S3-ePaper-1.54 (V2) board with a 200x200 e-ink display. The firmware sleeps in a drawer, wakes up every half hour, asks OpenWeather how it feels outside, and draws one of three garments (jacket, pullover, shirt) plus a rain risk warning. Then it goes back to sleep for another half hour, which is why a small battery is designed to last months. If nobody configured it yet, it turns into a wifi hotspot and serves its own config page. Type your city, pick thresholds, done.
+<img src="device.png" alt="The sign on a wall showing a pullover, 19 degrees feels like, rain risk and the time" width="320">
+
+It is a Waveshare ESP32-S3-ePaper-1.54 (V2) board with a 200x200 e-ink display. It sleeps in a drawer, wakes on whatever interval you pick, asks OpenWeather how it feels outside, and draws one of three garments (jacket, pullover, shirt) plus a rain warning. Then it goes back to sleep with the radio off, which is the only reason a battery this small is worth trying.
+
+If nobody has configured it yet, it puts up its own wifi network and serves a config page. Type your city, drag the two handles to say where jacket becomes pullover becomes shirt, done.
 
 The name is short for "should i wear a jacket". The README is mostly the name.
 
@@ -21,7 +25,7 @@ make provision       # push secrets into the device's encrypted storage
 make firmware-flash  # build, flash, drop into the serial console
 ```
 
-The console prints the device's address once wifi connects. Open it, set your city, and let it live somewhere you dress in front of. Holding BOOT while resetting forces the config page again.
+The console prints the device's address once wifi connects. Open it, set your city, and let it live somewhere you dress in front of. Hold BOOT while it powers on to get the config page back.
 
 ## No device yet?
 
