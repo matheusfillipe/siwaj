@@ -7,7 +7,7 @@ UV := uv run --project tools
         core-format core-format-check core-lint core-lint-fix core-test core-ts core-snapshots core-preview demo \
         web-typecheck web-bundle web-watch \
         tools-format tools-format-check tools-lint tools-test \
-        firmware-partitions build build-qemu firmware-image firmware-flash firmware-flash-plain firmware-monitor \
+        firmware-partitions build build-qemu firmware-image firmware-flash firmware-flash-plain firmware-reflash firmware-monitor \
         qemu-install qemu-image qemu-smoke qemu-run qemu-display qemu-stop qemu-reset \
         qemu-charge qemu-unplug qemu-sleep qemu-button qemu-provision provision test-e2e \
         ci-host-checks ci-emulator-tests ci-local ci-local-plan \
@@ -117,6 +117,12 @@ firmware-flash: build ## flash the device (needs espup + cargo-espflash; encrypt
 # image runs sit in plaintext NVS: provision the real ones after firmware-flash.
 firmware-flash-plain: build ## flash the device without flash/NVS encryption (new-board bring-up)
 	cd firmware && $(FW_ENV) cargo espflash flash --release --monitor $(PORT_ARG)
+
+# A device that only shows up on the bus for a moment (one stuck in a
+# wake-fail-sleep cycle) is gone again before the asset bundle finishes
+# rebuilding, so this writes whatever `build` produced last and nothing else.
+firmware-reflash: ## flash the last build with no rebuild, for a device that appears only briefly
+	cd firmware && $(FW_ENV) cargo espflash flash --release $(PORT_ARG)
 
 firmware-monitor:
 	cd firmware && cargo espflash monitor $(PORT_ARG)
