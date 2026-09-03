@@ -132,7 +132,24 @@ fn main() -> anyhow::Result<()> {
     #[cfg(esp32)]
     let boot_held = false;
 
-    let config_mode = !configured || boot_held;
+    // A press that ends deep sleep is over long before the CPU gets here, so
+    // the latched wake cause is what reports it. Reading the pin alone would
+    // only catch someone still holding the button. Both causes count: an RTC
+    // pin wake is reported as EXT1 on some parts and GPIO on others.
+    #[cfg(esp32s3)]
+    // SAFETY: reads the wake cause the ROM latched at boot; no side effects.
+    let wake_cause = unsafe { esp_idf_svc::sys::esp_sleep_get_wakeup_cause() };
+    #[cfg(esp32s3)]
+    let woke_on_button = wake_cause == esp_idf_svc::sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_EXT1
+        || wake_cause == esp_idf_svc::sys::esp_sleep_source_t_ESP_SLEEP_WAKEUP_GPIO;
+    #[cfg(esp32)]
+    let (wake_cause, woke_on_button) = (0, false);
+
+    let config_mode = !configured || boot_held || woke_on_button;
+    log::info!(
+        "wake_cause={wake_cause} configured={configured} boot_held={boot_held} woke_on_button={woke_on_button} -> {}",
+        if config_mode { "config mode" } else { "weather cycle" }
+    );
 
     if config_mode {
         #[cfg(esp32)]
@@ -192,6 +209,33 @@ fn run_config_mode(
         spi2,
         adc1,
     } = hardware;
+    // The mark goes up before the radio does. Nothing about it needs the
+    // network, and painting after bring-up left the panel saying nothing for
+    // the ten-odd seconds a join and a clock sync take, which reads as a device
+    // that ignored the button.
+    #[cfg(esp32s3)]
+    let mut board = match board::Board::new(pins, spi2, adc1) {
+        Ok(board) => Some(board),
+        Err(e) => {
+            // the page is the point of setup mode; losing the panel is worth
+            // reporting but not worth refusing to serve over
+            log::error!("config mode: panel unavailable: {e}");
+            None
+        }
+    };
+    #[cfg(esp32s3)]
+    if let Some(board) = board.as_mut() {
+        let mut setup = siwaj_core::render::View::offline(
+            siwaj_core::render::TimeOfDay::from_unix(now_unix()),
+            board.battery.pct(),
+            board.battery.charging(),
+        );
+        setup.serving = true;
+        if let Err(e) = board.draw(&setup) {
+            log::error!("config mode: setup frame failed: {e}");
+        }
+    }
+
     // Past this point the radio is on, so nothing may return early: an error
     // that escapes here would abort into a reboot with wifi still up, and a
     // device that keeps rebooting into setup empties the battery in a day.
@@ -202,10 +246,14 @@ fn run_config_mode(
         secrets_store.get(secrets::SecretKey::WifiSsid),
         secrets_store.get(secrets::SecretKey::WifiPass),
         nvs_partition,
+        net::OnJoinFailure::ServeSetupNetwork,
     ) {
         Ok(net) => net,
         Err(e) => {
             log::error!("config mode: wifi bring-up failed: {e}");
+            if let Some(board) = board.as_mut() {
+                board.power_down();
+            }
             deep_sleep(WAKE_INTERVAL);
         }
     };
@@ -226,31 +274,14 @@ fn run_config_mode(
 
     #[cfg(esp32s3)]
     {
-        // The panel holds whatever it was last given, so setup mode paints
-        // the mark on the way in and paints it away on the way out. The board
-        // stays up across the session and only sleeps once, at the end.
-        let mut board = match board::Board::new(pins, spi2, adc1) {
-            Ok(board) => Some(board),
-            Err(e) => {
-                // the page is the point of setup mode; losing the panel is
-                // worth reporting but not worth refusing to serve over
-                log::error!("config mode: panel unavailable: {e}");
-                None
-            }
-        };
-        if let Some(board) = board.as_mut() {
-            let mut setup = siwaj_core::render::View::offline(
-                siwaj_core::render::TimeOfDay::from_unix(now_unix()),
-                board.battery.pct(),
-                board.battery.charging(),
-            );
-            setup.serving = true;
-            if let Err(e) = board.draw(&setup) {
-                log::error!("config mode: setup frame failed: {e}");
-            }
-        }
-
-        if let Err(e) = serve_until_idle(store, secrets_store) {
+        // The panel holds whatever it was last given, so setup mode paints the
+        // mark on the way in and paints it away on the way out. The board stays
+        // up across the session and only sleeps once, at the end.
+        if let Err(e) = serve_until_idle(
+            store,
+            secrets_store,
+            board.as_mut().map(|board| &mut board.battery),
+        ) {
             log::error!("config mode: server failed: {e}");
         }
 
@@ -296,6 +327,7 @@ fn run_config_mode(
 fn serve_until_idle(
     store: &'static store::Store,
     secrets_store: &'static secrets::Secrets,
+    #[cfg(esp32s3)] mut battery: Option<&mut board::Battery>,
 ) -> anyhow::Result<()> {
     let server = server::start(store, secrets_store)?;
     touch();
@@ -304,6 +336,10 @@ fn serve_until_idle(
     // read per tick, not once: a window saved during this session has to take
     // effect now, or the countdown the page shows disagrees with the loop
     while idle_for() < awake_window(store) {
+        #[cfg(esp32s3)]
+        if let Some(battery) = battery.as_mut() {
+            publish_battery_mv(battery.millivolts());
+        }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     drop(server);
@@ -350,6 +386,7 @@ fn run_weather_cycle(
         secrets_store.get(secrets::SecretKey::WifiSsid),
         secrets_store.get(secrets::SecretKey::WifiPass),
         nvs_partition,
+        net::OnJoinFailure::GiveUp,
     )?;
     sync_time();
 
@@ -409,6 +446,19 @@ fn awake_window(store: &store::Store) -> std::time::Duration {
 
 pub(crate) fn touch() {
     *LAST_REQUEST.lock().expect("activity lock") = Some(std::time::Instant::now());
+}
+
+/// The ADC belongs to the board, which the HTTP handlers do not hold, so the
+/// serve loop leaves its latest reading here for them.
+static BATTERY_MV: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+
+#[cfg(esp32s3)]
+fn publish_battery_mv(reading: Option<u32>) {
+    *BATTERY_MV.lock().expect("battery lock") = reading;
+}
+
+pub(crate) fn battery_mv() -> Option<u32> {
+    *BATTERY_MV.lock().expect("battery lock")
 }
 
 pub(crate) fn idle_for() -> std::time::Duration {
@@ -495,9 +545,25 @@ fn arm_cycle_watchdog(refresh: std::time::Duration) {
         .expect("spawn watchdog");
 }
 
+/// GPIO0 carries the BOOT button and is one of the S3's RTC pins, so it can
+/// pull the chip out of deep sleep. ext1 goes on working with the RTC
+/// peripherals powered down, and the board's own pull-up on that line (the one
+/// that makes a normal boot possible) holds it high, so no internal pull has to
+/// be kept alive to hold the level.
+#[cfg(esp32s3)]
+const WAKE_BUTTON_MASK: u64 = 1 << 0;
+
 #[cfg(esp32s3)]
 fn deep_sleep(duration: std::time::Duration) -> ! {
     log::info!("deep sleeping for {}s", duration.as_secs());
+    // SAFETY: arms one RTC-capable pin as a wake source. The call only writes
+    // RTC wake configuration, takes no ownership, and is safe to repeat.
+    unsafe {
+        esp_idf_svc::sys::esp_sleep_enable_ext1_wakeup_io(
+            WAKE_BUTTON_MASK,
+            esp_idf_svc::sys::esp_sleep_ext1_wakeup_mode_t_ESP_EXT1_WAKEUP_ANY_LOW,
+        );
+    }
     // SAFETY: terminal call; the SoC enters deep sleep and never returns, so
     // no state after this point is observable.
     unsafe { esp_idf_svc::sys::esp_deep_sleep(duration.as_micros() as u64) }

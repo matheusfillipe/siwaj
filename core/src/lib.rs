@@ -111,6 +111,10 @@ pub const CONFIG_MODE_IDLE: core::time::Duration =
 #[ts(export)]
 pub struct DeviceStatus {
     pub seconds_until_sleep: u32,
+    /// Cell voltage as the board reads it, for comparing against a meter at the
+    /// battery terminals. Absent until a reading has been taken, and on a build
+    /// with no battery sense line.
+    pub battery_mv: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

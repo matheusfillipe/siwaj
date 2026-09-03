@@ -152,6 +152,7 @@ pub fn start(store: &'static Store, secrets: &'static Secrets) -> Result<EspHttp
             req,
             &siwaj_core::DeviceStatus {
                 seconds_until_sleep: left.as_secs() as u32,
+                battery_mv: crate::battery_mv(),
             },
         )
     })?;

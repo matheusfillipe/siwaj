@@ -33,6 +33,18 @@ pub fn bring_up(
     Ok(NetUp { _eth: eth })
 }
 
+/// What a caller wants when the stored credentials do not get onto the network.
+#[cfg(esp32s3)]
+pub enum OnJoinFailure {
+    /// Serve the setup network, so the credentials that failed can be corrected
+    /// from the page. Without this a wrong password leaves the device
+    /// unreachable over the air for good.
+    ServeSetupNetwork,
+    /// Report the failure. A weather cycle has nothing to serve and its caller
+    /// sleeps instead.
+    GiveUp,
+}
+
 #[cfg(esp32s3)]
 pub fn bring_up(
     modem: esp_idf_svc::hal::modem::Modem<'static>,
@@ -40,6 +52,7 @@ pub fn bring_up(
     ssid: Option<String>,
     pass: Option<String>,
     nvs: esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsDefault>,
+    on_failure: OnJoinFailure,
 ) -> Result<NetUp, anyhow::Error> {
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(modem, sys_loop.clone(), Some(nvs))?,
@@ -47,34 +60,20 @@ pub fn bring_up(
     )?;
 
     let ap_mode = match (ssid, pass) {
-        (Some(ssid), Some(pass)) if !ssid.is_empty() => {
-            let conf = WifiConfiguration::Client(ClientConfiguration {
-                ssid: ssid
-                    .as_str()
-                    .try_into()
-                    .map_err(|_| anyhow::anyhow!("ssid too long"))?,
-                password: pass
-                    .as_str()
-                    .try_into()
-                    .map_err(|_| anyhow::anyhow!("password too long"))?,
-                auth_method: AuthMethod::WPA2Personal,
-                ..Default::default()
-            });
-            wifi.set_configuration(&conf)?;
-            wifi.start()?;
-            wifi.connect()?;
-            wait_for_sta_ip(&wifi, 20)?;
-            false
-        }
+        (Some(ssid), Some(pass)) if !ssid.is_empty() => match join(&mut wifi, &ssid, &pass) {
+            Ok(()) => false,
+            Err(e) => match on_failure {
+                OnJoinFailure::GiveUp => return Err(e),
+                OnJoinFailure::ServeSetupNetwork => {
+                    log::warn!("joining '{ssid}' failed: {e:#}");
+                    log_networks_in_range(&mut wifi);
+                    serve_setup_network(&mut wifi)?;
+                    true
+                }
+            },
+        },
         _ => {
-            wifi.set_configuration(&WifiConfiguration::AccessPoint(AccessPointConfiguration {
-                ssid: "siwaj".try_into()?,
-                auth_method: AuthMethod::None,
-                ..Default::default()
-            }))?;
-            wifi.start()?;
-            wifi.wait_netif_up()?;
-            log::info!("softAP 'siwaj' up (no wifi credentials provisioned)");
+            serve_setup_network(&mut wifi)?;
             true
         }
     };
@@ -90,6 +89,71 @@ pub fn bring_up(
         wifi,
         access_point: ap_mode,
     })
+}
+
+#[cfg(esp32s3)]
+fn join(
+    wifi: &mut BlockingWifi<EspWifi<'static>>,
+    ssid: &str,
+    pass: &str,
+) -> Result<(), anyhow::Error> {
+    let conf = WifiConfiguration::Client(ClientConfiguration {
+        ssid: ssid
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("ssid too long"))?,
+        password: pass
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("password too long"))?,
+        auth_method: AuthMethod::WPA2Personal,
+        ..Default::default()
+    });
+    wifi.set_configuration(&conf)?;
+    wifi.start()?;
+    wifi.connect()?;
+    wait_for_sta_ip(wifi, 20)
+}
+
+/// A join that times out without ever reaching authentication means the radio
+/// never found that name, which is indistinguishable from a wrong password
+/// unless the alternatives are named. The 2.4GHz-only radio makes this worth
+/// printing: a 5GHz network is simply absent here however strong it looks on a
+/// phone. Runs while the station interface is still up, before it is torn down
+/// for the setup network.
+#[cfg(esp32s3)]
+fn log_networks_in_range(wifi: &mut BlockingWifi<EspWifi<'static>>) {
+    match wifi.scan() {
+        Ok(found) if found.is_empty() => log::warn!("scan saw no 2.4GHz networks at all"),
+        Ok(found) => {
+            for ap in found.iter() {
+                log::info!(
+                    "in range: '{}' ch{} {}dBm {:?}",
+                    ap.ssid,
+                    ap.channel,
+                    ap.signal_strength,
+                    ap.auth_method
+                );
+            }
+        }
+        Err(e) => log::warn!("scan failed: {e}"),
+    }
+}
+
+/// The device's own network, named for what it is there to do. The radio has
+/// to be stopped first: a failed join leaves the station interface running,
+/// and reconfiguring underneath it is refused.
+#[cfg(esp32s3)]
+fn serve_setup_network(wifi: &mut BlockingWifi<EspWifi<'static>>) -> Result<(), anyhow::Error> {
+    let _ = wifi.disconnect();
+    let _ = wifi.stop();
+    wifi.set_configuration(&WifiConfiguration::AccessPoint(AccessPointConfiguration {
+        ssid: "siwaj".try_into()?,
+        auth_method: AuthMethod::None,
+        ..Default::default()
+    }))?;
+    wifi.start()?;
+    wifi.wait_netif_up()?;
+    log::info!("setup network 'siwaj' up");
+    Ok(())
 }
 
 /// wait_netif_up blocks forever on a network that never delivers DHCP, so the

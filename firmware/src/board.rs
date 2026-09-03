@@ -127,14 +127,22 @@ mod device {
         /// board: too low and a fresh cell reads as plugged in forever.
         const EXTERNAL_POWER: f32 = 4.2;
 
-        pub fn volts(&mut self) -> Option<f32> {
+        /// Cell voltage in millivolts. The doubling undoes the divider that
+        /// puts half the rail on the sense pin, so this is comparable to a
+        /// meter at the battery terminals and is what makes that ratio
+        /// checkable rather than assumed.
+        pub fn millivolts(&mut self) -> Option<u32> {
             match self.channel.read() {
-                Ok(mv) => Some(mv as f32 * 2.0 / 1000.0),
+                Ok(mv) => Some(mv as u32 * 2),
                 Err(e) => {
                     log::warn!("battery adc read failed: {e}");
                     None
                 }
             }
+        }
+
+        pub fn volts(&mut self) -> Option<f32> {
+            self.millivolts().map(|mv| mv as f32 / 1000.0)
         }
 
         /// True only while the rail sits above what the cell alone can supply.
@@ -160,4 +168,4 @@ mod device {
 }
 
 #[cfg(esp32s3)]
-pub use device::{Board, VBAT_PWR_PIN};
+pub use device::{Battery, Board, VBAT_PWR_PIN};
