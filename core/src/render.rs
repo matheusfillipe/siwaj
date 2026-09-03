@@ -496,15 +496,19 @@ fn draw_battery<D: DrawTarget<Color = BinaryColor>>(
     Ok(())
 }
 
+/// The clock keeps a fixed column rather than centring on the panel. The rain
+/// percentage to its left is two characters wider at 100% than at 0%, so a
+/// fixed centre left the two touching on the wettest day. This column sits
+/// midway between that text at its widest and the charging bolt.
+const CLOCK_LEFT: i32 = 85;
+
 fn draw_updated<D: DrawTarget<Color = BinaryColor>>(
     d: &mut D,
     updated: TimeOfDay,
 ) -> Result<(), D::Error> {
     let style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let text = format!("{:02}:{:02}", updated.hour, updated.minute);
-    let bb = Text::new(&text, Point::zero(), style).bounding_box();
-    let x = WIDTH as i32 / 2 - bb.size.width as i32 / 2;
-    Text::new(&text, Point::new(x, ROW_BASELINE), style)
+    Text::new(&text, Point::new(CLOCK_LEFT, ROW_BASELINE), style)
         .draw(d)
         .map(|_| ())
 }

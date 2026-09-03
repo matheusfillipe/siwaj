@@ -87,6 +87,45 @@ fn snapshots_match_fixtures() {
     }
 }
 
+/// Packed 1bpp, 25 bytes a row, and a cleared frame is all ones, so a zero bit
+/// is ink.
+fn has_ink(fb: &Framebuffer, x: usize, y: usize) -> bool {
+    fb.buffer()[y * 25 + x / 8] & (0x80 >> (x % 8)) == 0
+}
+
+#[test]
+fn bottom_row_keeps_a_gap_at_its_widest() {
+    // The tightest the row ever gets: the rain percentage is two characters
+    // wider at 100% than at 0%, and charging adds a bolt to the left of the
+    // cell. A snapshot cannot catch this on its own, since it would happily
+    // record the two touching.
+    let t = Thresholds {
+        low_c: 8.0,
+        high_c: 21.0,
+    };
+    let mut widest = view(Garment::from_feels_like(11.0, &t), rain(100, true), 11.0);
+    widest.charging = true;
+    widest.updated = TimeOfDay {
+        hour: 23,
+        minute: 58,
+    };
+    let fb = render(&widest);
+
+    let band = 156..180;
+    let inked = |x: usize| band.clone().any(|y| has_ink(&fb, x, y));
+    assert!(inked(40), "expected the rain percentage to have drawn");
+    assert!(inked(90), "expected the clock to have drawn");
+
+    // A gutter, not the widest blank run: the digits of the clock are spaced
+    // several pixels apart on their own, so a run-length check passes happily
+    // while the two groups touch.
+    let gutter: Vec<usize> = (74..=84).filter(|&x| inked(x)).collect();
+    assert!(
+        gutter.is_empty(),
+        "rain percentage and clock run into each other; ink in the gutter at {gutter:?}"
+    );
+}
+
 #[test]
 fn framebuffer_starts_white() {
     let fb = Framebuffer::new();
