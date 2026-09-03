@@ -32,7 +32,9 @@ precommit: fix ## hook entry: same as fix
 
 check: core-format-check core-lint core-test web-typecheck web-bundle tools-format-check tools-lint tools-test ## run all host checks (the pre-commit gate)
 
-check-firmware: firmware-partitions ## run clippy -D warnings on both firmware targets (esp32s3 device + esp32 emulator)
+# the firmware embeds the gzipped web bundle with include_bytes!, so it cannot
+# compile at all until that exists; a clean checkout has no web/dist
+check-firmware: web-bundle firmware-partitions ## run clippy -D warnings on both firmware targets (esp32s3 device + esp32 emulator)
 	cd firmware && $(FW_ENV) cargo clippy --release -- -D warnings
 	cd firmware && MCU=esp32 $(FW_ENV_QEMU) cargo clippy --release --target xtensa-esp32-espidf --target-dir target-esp32 -- -D warnings
 
