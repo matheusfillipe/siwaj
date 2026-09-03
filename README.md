@@ -17,7 +17,15 @@ When unconfigured, it brings up its own wifi network and serves a setup page. Yo
 
 ## Burn it
 
-You need the board above, an OpenWeather key and the Rust esp toolchain ([espup](https://github.com/esp-rs/espup)).
+| Part | Notes |
+| --- | --- |
+| Waveshare ESP32-S3-ePaper-1.54 (V2) | 200x200 e-ink panel, 8MB flash, ships with the case |
+| 3.7V LiPo with an MX1.25 plug | Sold as MX1.25, Molex PicoBlade, or "JST 1.25". JST-PH 2.0 and JST-GH 1.25 look close and do not mate. A 40 x 20 x 6 mm cell fits the case |
+| USB-C cable that carries data | A charge-only cable powers the board and enumerates nothing, which looks exactly like dead hardware |
+
+The board runs from USB alone, so the cell is only needed once it hangs on a wall.
+
+You also need an OpenWeather key and the Rust esp toolchain ([espup](https://github.com/esp-rs/espup)).
 
 > [!IMPORTANT]
 > The key needs a "One Call by Call" subscription. The first 1000 calls a day cost nothing, but OpenWeather asks for a card before it activates the plan. Each wake spends two calls, so a fifteen minute refresh runs at about 200 a day.
